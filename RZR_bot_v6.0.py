@@ -19,7 +19,7 @@ MN_TZ = pytz.timezone("Asia/Ulaanbaatar")
 now_mn = datetime.now(MN_TZ)
 
 # 🌐 Token-уудыг ENV-оос ачаална
-TOKEN = os.getenv("DISCORD_TOKEN")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
@@ -1548,7 +1548,7 @@ async def on_message(message):
 
 async def main():
     keep_alive()
-    await bot.start(os.environ["TOKEN"])       # ⚠️ bot.run биш
+    await bot.start(os.environ["DISCORD_TOKEN"])       # ⚠️ bot.run биш
 
 if __name__ == "__main__":
     print("🚀 Starting bot...")
