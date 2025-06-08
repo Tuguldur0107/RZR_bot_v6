@@ -1578,14 +1578,14 @@ async def on_ready():
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
 
-    try:
-        copy_scores_from_github()
-    except Exception as e:
-        print(f"❌ copy_scores_from_github алдаа: {e}")
-    try:
-        copy_donators_from_github()
-    except Exception as e:
-        print(f"❌ copy_donators_from_github алдаа: {e}")
+    # try:
+    #     copy_scores_from_github()
+    # except Exception as e:
+    #     print(f"❌ copy_scores_from_github алдаа: {e}")
+    # try:
+    #     copy_donators_from_github()
+    # except Exception as e:
+    #     print(f"❌ copy_donators_from_github алдаа: {e}")
 
     for guild in bot.guilds:
         bot.tree.copy_global_to(guild=guild)
