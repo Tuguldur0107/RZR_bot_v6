@@ -1480,7 +1480,11 @@ async def on_ready():
 
         copy_scores_from_github()
 
+        # 👉 ЭНЭ МӨРӨӨ НЭМ:
+        print(f"📡 bot.guilds: {bot.guilds}")
+
         for guild in bot.guilds:
+            print(f"➡️ syncing guild: {guild.name} ({guild.id})")
             bot.tree.copy_global_to(guild=guild)
             await bot.tree.sync(guild=guild)
             print(f"✅ Slash commands synced to: {guild.name} ({guild.id})")
@@ -1490,6 +1494,7 @@ async def on_ready():
 
     except Exception as e:
         print(f"❌ on_ready error:", e)
+
 
 
 # 🟢 Run bot
