@@ -1512,28 +1512,44 @@ async def backup_now(interaction: discord.Interaction):
 async def on_ready():
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
-    print(f"📡 GUILD_ID: {GUILD_ID}")
+    copy_donators_from_github()
+
+    # 🔄 Дэмжих Guild бүрт команд sync хийх
+    for guild in bot.guilds:
+        bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync(guild=guild)
+        print(f"✅ Slash commands synced: {guild.name} ({guild.id})")
+
+    # 🧠 Task-уудыг эхлүүлэх
+    asyncio.create_task(session_timeout_checker())
+    asyncio.create_task(github_auto_commit())
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    user_id = str(message.author.id)
+    now = datetime.now(timezone.utc).isoformat()
 
     try:
-        if GUILD_ID:
-            GUILD = discord.Object(id=GUILD_ID)
-            await bot.tree.sync(guild=GUILD)
-            print(f"✅ Slash commands synced to GUILD_ID: {GUILD_ID}")
-        else:
-            await bot.tree.sync()
-            print("⚠️ GUILD_ID олдсонгүй. Commands global-оор sync хийгдлээ.")
-    except Exception as e:
-        print(f"❌ Slash command sync алдаа: {e}")
+        with open("last_message.json", "r") as f:
+            last_seen = json.load(f)
+    except FileNotFoundError:
+        last_seen = {}
 
-# ⏳ Main function-г async-аар эхлүүлнэ
+    last_seen[user_id] = now
+
+    with open("last_message.json", "w") as f:
+        json.dump(last_seen, f, indent=4)
+
+    await bot.process_commands(message)
+
+
 async def main():
-    copy_donators_from_github()
-    keep_alive()  # Thread дээр ажиллуулдаг бол OK
-    await bot.start(TOKEN)  # ⚠️ Зөвхөн async function дотроос дуудна
-    #copy_scores_from_github()
-    
+    keep_alive()
+    await bot.start(os.environ["TOKEN"])       # ⚠️ bot.run биш
 
 if __name__ == "__main__":
-    import asyncio
+    print("🚀 Starting bot...")
     asyncio.run(main())
-    
