@@ -80,7 +80,7 @@ def keep_alive():
     t.start()
 
 def copy_scores_from_github():
-    url = "https://raw.githubusercontent.com/Tuguldur0107/RZR_bot_v6/main/scores.json"
+    url = "https://raw.githubusercontent.com/Tuguldur0107/RZR_bot_v6/main/data/scores.json"
     local_path = SCORE_FILE
 
     try:
@@ -95,7 +95,7 @@ def copy_scores_from_github():
         print("❌ GitHub fetch алдаа:", e)
 
 def copy_donators_from_github():
-    url = "https://raw.githubusercontent.com/Tuguldur0107/RZR_bot_v6/main/donators.json"
+    url = "https://raw.githubusercontent.com/Tuguldur0107/RZR_bot_v6/main/data/donators.json"
     local_path = DONATOR_FILE
 
     try:
@@ -1590,17 +1590,26 @@ async def backup_now(interaction: discord.Interaction):
 async def on_ready():
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
-    
 
-    # 🔄 Дэмжих Guild бүрт команд sync хийх
+    try:
+        copy_scores_from_github()
+    except Exception as e:
+        print(f"❌ copy_scores_from_github алдаа: {e}")
+    try:
+        copy_donators_from_github()
+    except Exception as e:
+        print(f"❌ copy_scores_from_github алдаа: {e}")
+
+    # Дэмжих Guild бүрт команд sync хийх
     for guild in bot.guilds:
         bot.tree.copy_global_to(guild=guild)
         await bot.tree.sync(guild=guild)
         print(f"✅ Slash commands synced: {guild.name} ({guild.id})")
 
-    # 🧠 Task-уудыг эхлүүлэх
+    # Task-уудыг эхлүүлэх
     asyncio.create_task(session_timeout_checker())
-    asyncio.create_task(commit_to_github_multi())
+    asyncio.create_task(github_auto_commit())
+
 
 @bot.event
 async def on_message(message):
@@ -1634,5 +1643,5 @@ async def main():
 
 if __name__ == "__main__":
     print("🚀 Starting bot...")
-    copy_donators_from_github()
+    #copy_donators_from_github()
     asyncio.run(main())
