@@ -1478,12 +1478,14 @@ async def backup_now(interaction: discord.Interaction):
 # 🔄 Bot ажиллах үед
 @bot.event
 async def on_ready():
-    copy_scores_from_github()
-
+    
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
 
+    copy_scores_from_github()
+
     for guild in bot.guilds:
+        bot.tree.copy_global_to(guild=guild)
         await bot.tree.sync(guild=guild)  # ✅ Зөв: зөвхөн sync() ашиглахад хангалттай
         print(f"✅ Slash commands synced to: {guild.name} ({guild.id})")
 
