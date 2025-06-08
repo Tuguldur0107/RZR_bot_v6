@@ -82,12 +82,12 @@ def keep_alive():
 
 def copy_scores_from_github():
     url = "https://raw.githubusercontent.com/Tuguldur0107/RZR_bot_v6/main/data/scores.json"
-    local_path = "data/scores.json"
+    local_path = SCORE_FILE  # ✅ Render volume руу хадгална
 
     try:
         r = requests.get(url, timeout=10)
         if r.status_code == 200:
-            data = json.loads(r.text)  # JSON бүтэн байгааг шалгах
+            data = json.loads(r.text)
             with open(local_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
             print("✅ GitHub-с scores.json бүрэн хууллаа.")
@@ -98,13 +98,12 @@ def copy_scores_from_github():
 
 def copy_donators_from_github():
     url = "https://raw.githubusercontent.com/Tuguldur0107/RZR_bot_v6/main/data/donators.json"
-    local_path = "data/donators.json"  # local зам зөв байх ёстой
+    local_path = DONATOR_FILE  # ✅ Volume дээрх замыг ашиглана
 
     try:
         r = requests.get(url, timeout=10)
         if r.status_code == 200:
-            # JSON-ийн бүтэн байдлыг шалгахын тулд ачаалж үзэх
-            data = json.loads(r.text)  
+            data = json.loads(r.text)  # JSON-ийн бүтэн эсэхийг шалгах
             with open(local_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
             print("✅ GitHub-с donators.json бүрэн хууллаа.")
@@ -112,6 +111,7 @@ def copy_donators_from_github():
             print(f"❌ GitHub-с татаж чадсангүй: {r.status_code}")
     except Exception as e:
         print("❌ GitHub fetch алдаа:", e)
+
 
 def now_mongolia():
     return datetime.now(MN_TZ)
