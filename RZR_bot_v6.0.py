@@ -8,6 +8,9 @@ from datetime import datetime, timezone, timedelta
 import pytz
 import openai
 
+print("🧪 DEBUG CHECKPOINT 1")  # ← 1-р мөр
+print("🧪 discord модуль:", discord)  # ← 2-р мөр
+
 MN_TZ = pytz.timezone("Asia/Ulaanbaatar")
 
 # ⏱ Монголын цаг
@@ -19,6 +22,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 GUILD = discord.Object(id=1327201902789787680)
+print("🧪 GUILD object:", GUILD, type(GUILD))  # ← 3-р мөр
 
 # 📁 Файлын замууд (Render Volume: /mnt/data биш харин local path)
 BASE_DIR = "/mnt/data"
@@ -1465,6 +1469,7 @@ async def backup_now(interaction: discord.Interaction):
 # 🔄 Bot ажиллах үед
 @bot.event
 async def on_ready():
+    print("🧪 on_ready started")  # ← 4-р мөр
     print(f"🤖 RZR Bot v6.0 ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
     print("GUILD:", GUILD)
