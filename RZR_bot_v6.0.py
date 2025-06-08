@@ -595,6 +595,8 @@ JSON зөвхөн дараах бүтэцтэй буцаа:
 # ⚙️ Discord intents
 intents = discord.Intents.default()
 intents.message_content = True
+intents.guilds = True
+
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 
@@ -1578,6 +1580,7 @@ async def backup_now(interaction: discord.Interaction):
 print(bot)  # bot объектийг print хий — id нь ямар байна?
 @bot.event
 async def on_ready():
+    print("✅ on_ready ажиллалаа")
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
 
