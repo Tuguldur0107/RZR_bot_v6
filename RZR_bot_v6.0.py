@@ -1474,7 +1474,7 @@ async def backup_now(interaction: discord.Interaction):
 # 🔄 Bot ажиллах үед
 @bot.event
 async def on_ready():
-    print(f"✅ [TEST] Logged in as {bot.user}")
+    print("✅ Bot ready")  # ← хамгийн эхэнд
     try:
         print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
         print("📁 Working directory:", os.getcwd())
@@ -1502,6 +1502,6 @@ async def on_ready():
 if __name__ == "__main__":
     keep_alive()  # 🔥 Render-д port нээж өгөх Flask-тай холбоос
     if TOKEN:
-        bot.run("MTM3NDA2NzA1MzY3MzA1NDI3MA.GA4gDl.v9ULHeU_6jvnE_dd2YI46_EIiWEqr03MZ5amVY")
+        bot.run(TOKEN)
     else:
         print("❌ DISCORD_TOKEN орчны хувьсагч тохируулаагүй байна.")
