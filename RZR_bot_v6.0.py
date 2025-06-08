@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 import asyncio
 import os
+import time
 import json
 from datetime import datetime, timezone, timedelta
 import pytz
@@ -257,55 +258,45 @@ def commit_to_github_multi(file_list, message="update"):
     print(f"✅ {len(tree_items)} файлыг GitHub руу багцлаад commit хийлээ.")
 
 
+# Файлын хамгийн сүүлд өөрчлөгдсөн хугацааг хадгалах dictionary
+last_modified_times = {}
 
-def commit_to_github_multi(file_list, message="update"):
-    import base64
-    import requests
-    import os
-
-    token = os.environ.get("GITHUB_TOKEN")
-    repo = os.environ.get("GITHUB_REPO")
-    branch = os.environ.get("GITHUB_BRANCH", "main")
-
-    if not token or not repo:
-        print("❌ GitHub тохиргоо бүрэн биш байна.")
-        return
-
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github+json"
-    }
-
-    for filepath in file_list:
-        github_path = os.path.basename(filepath)
-
+async def github_auto_commit():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
         try:
-            with open(filepath, "rb") as f:
-                content = base64.b64encode(f.read()).decode("utf-8")
+            print("🕒 GitHub commit task ажиллаж байна...")
+            file_list = [
+                SCORE_FILE,
+                MATCH_LOG_FILE,
+                LAST_FILE,
+                SHIELD_FILE,
+                DONATOR_FILE,
+                SCORE_LOG_FILE
+            ]
+
+            # Шалгах - аль файлууд өөрчлөгдсөн байна вэ?
+            changed_files = []
+            for filepath in file_list:
+                if not os.path.exists(filepath):
+                    continue
+                mtime = os.path.getmtime(filepath)
+                last_mtime = last_modified_times.get(filepath)
+                if last_mtime is None or mtime > last_mtime:
+                    changed_files.append(filepath)
+                    last_modified_times[filepath] = mtime
+
+            if changed_files:
+                print(f"🔄 {len(changed_files)} файл шинэчлэгдсэн тул backup хийж байна...")
+                commit_to_github_multi(changed_files, "⏱ Автомат GitHub commit (60мин)")
+
+            else:
+                print("✅ Файл шинэчлэгдээгүй байна, backup хийх шаардлагагүй.")
+
         except Exception as e:
-            print(f"⚠️ {github_path} файл уншихад алдаа гарлаа:", e)
-            continue
+            print("❌ GitHub commit task error:", e)
 
-        url = f"https://api.github.com/repos/{repo}/contents/{github_path}"
-
-        # 📥 sha авах (хуучин commit байвал)
-        res = requests.get(url, headers=headers, params={"ref": branch})
-        sha = res.json().get("sha") if res.ok else None
-
-        data = {
-            "message": message,
-            "branch": branch,
-            "content": content
-        }
-        if sha:
-            data["sha"] = sha
-
-        # 🚀 Commit хийнэ
-        r = requests.put(url, headers=headers, json=data)
-        if r.status_code in [200, 201]:
-            print(f"✅ {github_path} GitHub-д хадгалагдлаа.")
-        else:
-            print(f"❌ {github_path} commit алдаа:", r.status_code, r.text)
+        await asyncio.sleep(3600)  # 60 минут хүлээх
 
 # ⏱ Session хугацаа дууссан эсэх шалгагч task
 async def session_timeout_checker():
