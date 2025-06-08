@@ -1495,6 +1495,7 @@ async def on_ready():
 
 # 🟢 Run bot
 if __name__ == "__main__":
+    print("✅ TOKEN байна. Bot ажиллуулж эхэлж байна.")
     if TOKEN:
         bot.run(TOKEN)
     else:
