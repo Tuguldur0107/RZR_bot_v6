@@ -164,24 +164,63 @@ def log_score_transaction(action, winners, losers, initiator_id, timestamp):
     }
     append_to_json_list(SCORE_LOG_FILE, log_entry)
 
-async def github_auto_commit():
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        try:
-            print("🕒 GitHub commit task ажиллаж байна...")
-            file_list = [
-                SCORE_FILE,
-                MATCH_LOG_FILE,
-                LAST_FILE,
-                SHIELD_FILE,
-                DONATOR_FILE,
-                SCORE_LOG_FILE
-            ]
-            commit_to_github_multi(file_list, "⏱ Автомат GitHub commit (60мин)")
-        except Exception as e:
-            print("❌ GitHub commit task error:", e)
+def commit_to_github_multi(file_list, message="update"):
+    import base64
+    import requests
+    import os
 
-        await asyncio.sleep(3600)  # 60 минут
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPO")
+    branch = os.environ.get("GITHUB_BRANCH", "main")
+
+    if not token or not repo:
+        print("❌ GitHub тохиргоо бүрэн биш байна.")
+        return
+
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github+json"
+    }
+
+    for filepath in file_list:
+        github_path = filepath.replace("\\", "/").split("/data/")[-1]
+        github_path = "data/" + github_path  # data хавтас хадгалах
+
+        try:
+            with open(filepath, "rb") as f:
+                content = base64.b64encode(f.read()).decode("utf-8")
+        except Exception as e:
+            print(f"⚠️ {github_path} файл уншихад алдаа гарлаа:", e)
+            continue
+
+        url = f"https://api.github.com/repos/{repo}/contents/{github_path}"
+
+        # 📝 Одоогийн GitHub дахь файлын content авах
+        res = requests.get(url, headers=headers, params={"ref": branch})
+        if res.ok:
+            github_file_sha = res.json().get("sha")
+            github_file_content = res.json().get("content", "").replace("\n", "")
+            # Өөрчлөгдсөн эсэхийг шалгах
+            if content == github_file_content:
+                print(f"ℹ️ {github_path} өөрчлөгдөөгүй тул commit хийхгүй.")
+                continue
+        else:
+            github_file_sha = None
+
+        data = {
+            "message": message,
+            "branch": branch,
+            "content": content
+        }
+        if github_file_sha:
+            data["sha"] = github_file_sha
+
+        r = requests.put(url, headers=headers, json=data)
+        if r.status_code in [200, 201]:
+            print(f"✅ {github_path} GitHub-д хадгалагдлаа.")
+        else:
+            print(f"❌ {github_path} commit алдаа:", r.status_code, r.text)
+
 
 def commit_to_github_multi(file_list, message="update"):
     import base64
