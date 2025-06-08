@@ -1635,8 +1635,8 @@ async def on_message(message):
         copy_donators_from_github()
     except Exception as e:
         print(f"❌ copy_donators_from_github алдаа: {e}")
-
-
+    
+    print("📁 SCORE_FILE =", SCORE_FILE)
 
     await bot.process_commands(message)
 
