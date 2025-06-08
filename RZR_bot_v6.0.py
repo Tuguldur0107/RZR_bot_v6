@@ -1497,7 +1497,6 @@ async def on_ready():
         print(f"❌ on_ready error:", e)
 
 
-
 # 🟢 Run bot
 if __name__ == "__main__":
     keep_alive()  # 🔥 Render-д port нээж өгөх Flask-тай холбоос
