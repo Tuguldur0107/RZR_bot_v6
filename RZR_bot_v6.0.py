@@ -18,10 +18,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
-
-
-
-GUILD = discord.Object(id=int(os.getenv("GUILD_ID")))
+GUILD = discord.Object(id=1327201902789787680)
 
 # 📁 Файлын замууд (Render Volume: /mnt/data биш харин local path)
 BASE_DIR = "data"
@@ -1470,6 +1467,7 @@ async def backup_now(interaction: discord.Interaction):
 async def on_ready():
     print(f"🤖 RZR Bot v6.0 ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
+    await bot.tree.clear_commands(guild=GUILD) 
     await bot.tree.sync(guild=GUILD)
     print("✅ Slash commands synced to 1 server")
 
