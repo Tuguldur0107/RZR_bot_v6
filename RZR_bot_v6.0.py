@@ -1500,7 +1500,6 @@ async def on_ready():
 # 🟢 Run bot
 if __name__ == "__main__":
     keep_alive()  # 🔥 Render-д port нээж өгөх Flask-тай холбоос
-    copy_scores_from_github()
     if TOKEN:
         bot.run(TOKEN)
     else:
