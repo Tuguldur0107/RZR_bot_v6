@@ -1598,7 +1598,7 @@ async def on_ready():
 
     # Task-уудыг эхлүүлэх
     asyncio.create_task(session_timeout_checker())
-    asyncio.create_task(github_auto_commit())
+    #asyncio.create_task(github_auto_commit())
 
 
 @bot.event
