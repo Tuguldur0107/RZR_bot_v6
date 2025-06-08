@@ -29,7 +29,7 @@ GUILD_ID = int(os.getenv("GUILD_ID")) if os.getenv("GUILD_ID") else None
 
 
 # 📁 Файлын замууд (Render Volume: /mnt/data биш харин local path)
-BASE_DIR = "/render_disks/rzr-disk"
+BASE_DIR = "/data"
 
 SCORE_FILE = f"{BASE_DIR}/scores.json"
 MATCH_LOG_FILE = f"{BASE_DIR}/match_log.json"
