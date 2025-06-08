@@ -1462,17 +1462,17 @@ async def backup_now(interaction: discord.Interaction):
 
 
 # 🔄 Bot ажиллах үед
+GUILD = discord.Object(id=1327201902789787680)  # энэ байх ёстой
+
 @bot.event
 async def on_ready():
-    print("🧪 on_ready started")
     print(f"🤖 RZR Bot v6.0 ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
+    print("GUILD:", GUILD)
 
-    for guild in bot.guilds:
-        print(f"🔧 Syncing commands for {guild.name} ({guild.id})")
-        await bot.tree.clear_commands(guild=guild)
-        await bot.tree.sync(guild=guild)
-        print(f"✅ Commands synced for {guild.name}")
+    await bot.tree.clear_commands(guild=GUILD)
+    await bot.tree.sync(guild=GUILD)
+    print("✅ Slash commands synced to 1 server")
 
     asyncio.create_task(session_timeout_checker())
     asyncio.create_task(github_auto_commit())
