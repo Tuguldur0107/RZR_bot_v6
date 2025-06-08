@@ -1613,15 +1613,15 @@ async def on_message(message):
     with open("last_message.json", "w") as f:
         json.dump(last_seen, f, indent=4)
     
-    try:
-        copy_scores_from_github()
-    except Exception as e:
-        print(f"❌ copy_scores_from_github алдаа: {e}")
+    # try:
+    #     copy_scores_from_github()
+    # except Exception as e:
+    #     print(f"❌ copy_scores_from_github алдаа: {e}")
 
-    try:
-        copy_donators_from_github()
-    except Exception as e:
-        print(f"❌ copy_donators_from_github алдаа: {e}")
+    # try:
+    #     copy_donators_from_github()
+    # except Exception as e:
+    #     print(f"❌ copy_donators_from_github алдаа: {e}")
 
     await bot.process_commands(message)
     asyncio.create_task(github_auto_commit())
