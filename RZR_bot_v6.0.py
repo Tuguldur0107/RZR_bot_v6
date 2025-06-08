@@ -779,10 +779,6 @@ async def clear_match(interaction: discord.Interaction):
     await interaction.followup.send("🧼 Match-ийн бүртгэл амжилттай цэвэрлэгдлээ.")
 
 @bot.tree.command(name="go_bot", description="Онооны дагуу тэнцвэртэй баг хуваарилна")
-@app_commands.describe(
-    team_count="Хэдэн багт хуваах вэ",
-    players_per_team="Нэг багт хэдэн тоглогч байх вэ"
-)
 async def go_bot(interaction: discord.Interaction, team_count: int, players_per_team: int):
     try:
         await interaction.response.defer(thinking=True)
