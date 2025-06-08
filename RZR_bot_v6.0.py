@@ -343,7 +343,7 @@ TIER_WEIGHT = {
 }
 
 def tier_score(data: dict) -> int:
-    tier = data.get("tier", "4-3")
+    tier = data.get("tier", "4-1")
     score = data.get("score", 0)
     return TIER_WEIGHT.get(tier, 0) + score
 
@@ -1575,7 +1575,7 @@ async def backup_now(interaction: discord.Interaction):
         print("❌ backup_now алдаа:", e)
         await interaction.followup.send(f"❌ Backup хийхэд алдаа гарлаа: {e}")
 
-
+print(bot)  # bot объектийг print хий — id нь ямар байна?
 @bot.event
 async def on_ready():
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
