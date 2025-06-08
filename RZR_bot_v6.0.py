@@ -1593,6 +1593,7 @@ async def on_ready():
         print(f"✅ Slash commands synced: {guild.name} ({guild.id})")
 
     asyncio.create_task(session_timeout_checker())
+    asyncio.create_task(github_auto_commit())
 
 @bot.event
 async def on_message(message):
@@ -1624,7 +1625,7 @@ async def on_message(message):
     #     print(f"❌ copy_donators_from_github алдаа: {e}")
 
     await bot.process_commands(message)
-    asyncio.create_task(github_auto_commit())
+    
 
 
 # 🎯 2. main() бол зөвхөн bot-г эхлүүлэх л үүрэгтэй байх ёстой
