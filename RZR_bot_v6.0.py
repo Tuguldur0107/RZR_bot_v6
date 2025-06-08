@@ -9,6 +9,9 @@ import pytz
 import openai
 import requests
 from keep_alive import keep_alive
+from dotenv import load_dotenv
+load_dotenv()
+
 
 MN_TZ = pytz.timezone("Asia/Ulaanbaatar")
 
@@ -1474,27 +1477,31 @@ async def backup_now(interaction: discord.Interaction):
 # 🔄 Bot ажиллах үед
 @bot.event
 async def on_ready():
-    print("✅ Bot ready")  # ← хамгийн эхэнд
+    print("✅ Bot ready")
     try:
         print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
         print("📁 Working directory:", os.getcwd())
 
+        # GitHub-с score татах
         copy_scores_from_github()
 
-        # 👉 ЭНЭ МӨРӨӨ НЭМ:
-        print(f"📡 bot.guilds: {bot.guilds}")
-
-        for guild in bot.guilds:
-            print(f"➡️ syncing guild: {guild.name} ({guild.id})")
-            bot.tree.copy_global_to(guild=guild)
+        # 🛠️ GUILD_ID ашиглан зөвхөн 1 server-т sync хийх
+        GUILD_ID = os.getenv("GUILD_ID")
+        if GUILD_ID:
+            guild = discord.Object(id=int(GUILD_ID))
             await bot.tree.sync(guild=guild)
-            print(f"✅ Slash commands synced to: {guild.name} ({guild.id})")
+            print(f"✅ Slash commands synced to GUILD_ID: {GUILD_ID}")
+        else:
+            await bot.tree.sync()
+            print("⚠️ GUILD_ID олдоогүй. Commands global-оор sync хийгдлээ.")
 
+        # Tasks эхлүүлнэ
         asyncio.create_task(session_timeout_checker())
         asyncio.create_task(github_auto_commit())
 
     except Exception as e:
         print(f"❌ on_ready error:", e)
+
 
 
 # 🟢 Run bot
