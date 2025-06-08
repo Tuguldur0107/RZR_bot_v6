@@ -56,9 +56,16 @@ TEAM_SETUP = {
 }
 
 GUILD_ID = os.getenv("GUILD_ID")
+print("🔎 GUILD_ID =", GUILD_ID, "| type:", type(GUILD_ID))  # DEBUG
+
 if GUILD_ID:
-    GUILD = discord.Object(id=int(GUILD_ID))
+    try:
+        GUILD = discord.Object(id=int(GUILD_ID))
+    except Exception as e:
+        print("❌ GUILD ID-г int болгоход алдаа гарлаа:", e)
+        GUILD = None
 else:
+    print("⚠️ GUILD_ID олдсонгүй!")
     GUILD = None
 
 
