@@ -20,7 +20,7 @@ MN_TZ = pytz.timezone("Asia/Ulaanbaatar")
 now_mn = datetime.now(MN_TZ)
 
 # 🌐 Token-уудыг ENV-оос ачаална
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
@@ -649,7 +649,6 @@ async def addme(interaction: discord.Interaction):
     TEAM_SETUP["player_ids"].append(user_id)
 
     await interaction.followup.send(f"✅ {interaction.user.mention} бүртгүүллээ.\nНийт бүртгэгдсэн: {len(TEAM_SETUP['player_ids'])}")
-
 
 @bot.tree.command(name="remove", description="Тоглогч өөрийгөө бүртгэлээс хасна")
 async def remove(interaction: discord.Interaction):
@@ -1639,12 +1638,12 @@ async def main():
     from keep_alive import keep_alive
     keep_alive()
 
-    if not DISCORD_TOKEN:
+    if not TOKEN:
         print("❌ DISCORD_TOKEN тохируулагдаагүй байна.")
         return
 
     print("🚀 Bot эхлэх гэж байна...")
-    await bot.start(DISCORD_TOKEN)
+    await bot.start(TOKEN)
 
 
 # 🎯 3. run main
