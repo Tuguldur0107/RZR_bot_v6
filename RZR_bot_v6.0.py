@@ -1,5 +1,3 @@
-raise RuntimeError("🔥 Энэ файл render дээр ажиллаж байна!")
-
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -10,8 +8,10 @@ from datetime import datetime, timezone, timedelta
 import pytz
 import openai
 
+GUILD = discord.Object(id=1327201902789787680)
 print("🧪 DEBUG CHECKPOINT 1")  # ← 1-р мөр
 print("🧪 discord модуль:", discord)  # ← 2-р мөр
+print("🧪 GUILD object:", GUILD, type(GUILD))
 
 MN_TZ = pytz.timezone("Asia/Ulaanbaatar")
 
@@ -23,7 +23,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
-GUILD = discord.Object(id=1327201902789787680)
+
 print("🧪 GUILD object:", GUILD, type(GUILD))  # ← 3-р мөр
 
 # 📁 Файлын замууд (Render Volume: /mnt/data биш харин local path)
