@@ -43,9 +43,6 @@ INFO_DIR = "Info"
 COMMANDS_FILE = f"{INFO_DIR}/commands.md"
 HELP_FILE = f"{INFO_DIR}/Readme.txt"
 
-# ⚙️ Discord intents
-intents = discord.Intents.all()
-bot = commands.Bot(command_prefix="/", intents=intents)
 
 # 🎮 Session төлөв
 GAME_SESSION = {
@@ -605,6 +602,9 @@ JSON зөвхөн дараах бүтэцтэй буцаа:
         print("❌ GPT response parse алдаа:", e)
         raise
 
+# ⚙️ Discord intents
+intents = discord.Intents.all()
+bot = commands.Bot(command_prefix="/", intents=intents)
 
 
 
