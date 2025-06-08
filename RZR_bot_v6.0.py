@@ -8,11 +8,6 @@ from datetime import datetime, timezone, timedelta
 import pytz
 import openai
 
-GUILD = discord.Object(id=1327201902789787680)
-print("🧪 DEBUG CHECKPOINT 1")  # ← 1-р мөр
-print("🧪 discord модуль:", discord)  # ← 2-р мөр
-print("🧪 GUILD object:", GUILD, type(GUILD))
-
 MN_TZ = pytz.timezone("Asia/Ulaanbaatar")
 
 # ⏱ Монголын цаг
@@ -23,8 +18,6 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
-
-print("🧪 GUILD object:", GUILD, type(GUILD))  # ← 3-р мөр
 
 # 📁 Файлын замууд (Render Volume: /mnt/data биш харин local path)
 BASE_DIR = "/mnt/data"
@@ -1471,19 +1464,18 @@ async def backup_now(interaction: discord.Interaction):
 # 🔄 Bot ажиллах үед
 @bot.event
 async def on_ready():
-    print("🧪 on_ready started")  # ← 4-р мөр
+    print("🧪 on_ready started")
     print(f"🤖 RZR Bot v6.0 ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
-    print("GUILD:", GUILD)
 
+    for guild in bot.guilds:
+        print(f"🔧 Syncing commands for {guild.name} ({guild.id})")
+        await bot.tree.clear_commands(guild=guild)
+        await bot.tree.sync(guild=guild)
+        print(f"✅ Commands synced for {guild.name}")
 
-    await bot.tree.clear_commands(guild=GUILD) 
-    await bot.tree.sync(guild=GUILD)
-    print("✅ Slash commands synced to 1 server")
-
-
-    asyncio.create_task(session_timeout_checker())   # ⏱ 24 цагийн session шалгагч
-    asyncio.create_task(github_auto_commit())        # ⏱ 60 минутын GitHub backup task
+    asyncio.create_task(session_timeout_checker())
+    asyncio.create_task(github_auto_commit())
 
 
 
