@@ -596,6 +596,7 @@ JSON зөвхөн дараах бүтэцтэй буцаа:
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
+intents = discord.Intents.all()
 
 bot = commands.Bot(command_prefix="/", intents=intents)
 
@@ -1577,7 +1578,21 @@ async def backup_now(interaction: discord.Interaction):
         print("❌ backup_now алдаа:", e)
         await interaction.followup.send(f"❌ Backup хийхэд алдаа гарлаа: {e}")
 
+@bot.tree.command(name="whois", description="Mention хийсэн хэрэглэгчийн нэрийг харуулна")
+@app_commands.describe(mention="Хэрэглэгчийн mention (@name) хэлбэрээр")
+async def whois(interaction: discord.Interaction, mention: str):
+    try:
+        uid = int(mention.strip("<@!>"))
+        member = await interaction.guild.fetch_member(uid)
+        await interaction.response.send_message(f"🕵️‍♂️ Энэ ID: `{uid}` → {member.mention} / Нэр: `{member.display_name}`")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Олдсонгүй: {e}")
+
+
 print(bot)  # bot объектийг print хий — id нь ямар байна?
+async def main():
+    keep_alive()
+
 @bot.event
 async def on_ready():
     print("✅ on_ready ажиллалаа")
@@ -1626,8 +1641,7 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
-async def main():
-    keep_alive()
+
     if not DISCORD_TOKEN:
         print("❌ DISCORD_TOKEN тохируулагдаагүй байна.")
         return
