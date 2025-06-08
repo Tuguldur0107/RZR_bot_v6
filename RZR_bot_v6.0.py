@@ -164,7 +164,12 @@ def commit_to_github_multi(file_list, message="update"):
     }
 
     for filepath in file_list:
-        github_path = os.path.basename(filepath)
+        # ✅ GitHub path-ийг тохируулна (data/ хавтсыг хадгална)
+        filepath = filepath.replace("\\", "/")  # Windows path засвар
+        if "/data/" in filepath:
+            github_path = "data/" + filepath.split("/data/")[-1]
+        else:
+            github_path = os.path.basename(filepath)
 
         try:
             with open(filepath, "rb") as f:
@@ -175,24 +180,10 @@ def commit_to_github_multi(file_list, message="update"):
 
         url = f"https://api.github.com/repos/{repo}/contents/{github_path}"
 
-        # 📥 sha авах (хуучин commit байвал)
         res = requests.get(url, headers=headers, params={"ref": branch})
         sha = res.json().get("sha") if res.ok else None
 
         data = {
-            "message": message,
-            "branch": branch,
-            "content": content
-        }
-        if sha:
-            data["sha"] = sha
-
-        # 🚀 Commit хийнэ
-        r = requests.put(url, headers=headers, json=data)
-        if r.status_code in [200, 201]:
-            print(f"✅ {github_path} GitHub-д хадгалагдлаа.")
-        else:
-            print(f"❌ {github_path} commit алдаа:", r.status_code, r.text)
 
 # ⏱ Session хугацаа дууссан эсэх шалгагч task
 async def session_timeout_checker():
