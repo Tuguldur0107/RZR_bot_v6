@@ -11,7 +11,7 @@ import requests
 from keep_alive import keep_alive
 from dotenv import load_dotenv
 load_dotenv()
-
+print("🧪 ENV LOADED", os.getenv("GUILD_ID")) 
 
 MN_TZ = pytz.timezone("Asia/Ulaanbaatar")
 
