@@ -1548,7 +1548,10 @@ async def on_message(message):
 
 async def main():
     keep_alive()
-    await bot.start(os.environ["DISCORD_TOKEN"])       # ⚠️ bot.run биш
+    if not DISCORD_TOKEN:
+        print("❌ DISCORD_TOKEN тохируулагдаагүй байна.")
+        return
+    await bot.start(DISCORD_TOKEN)
 
 if __name__ == "__main__":
     print("🚀 Starting bot...")
