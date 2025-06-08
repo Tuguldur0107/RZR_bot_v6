@@ -55,6 +55,11 @@ TEAM_SETUP = {
     "teams": []
 }
 
+GUILD_ID = os.getenv("GUILD_ID")
+if GUILD_ID:
+    GUILD = discord.Object(id=int(GUILD_ID))
+else:
+    GUILD = None
 
 
 
@@ -476,6 +481,10 @@ JSON зөвхөн дараах бүтэцтэй буцаа:
 
 
 
+@bot.tree.command(name="ping", description="Ботын latency-г шалгана")
+async def ping(interaction: discord.Interaction):
+    latency_ms = round(bot.latency * 1000)
+    await interaction.response.send_message(f"🏓 Pong! Latency: {latency_ms}ms", ephemeral=True)
 
 
 
@@ -1462,17 +1471,19 @@ async def backup_now(interaction: discord.Interaction):
 
 
 # 🔄 Bot ажиллах үед
-GUILD = discord.Object(id=1327201902789787680)  # энэ байх ёстой
-
 @bot.event
 async def on_ready():
-    print(f"🤖 RZR Bot v6.0 ажиллаж байна: {bot.user}")
+    print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
-    print("GUILD:", GUILD)
+    print("GUILD ID:", GUILD_ID)
 
-    await bot.tree.clear_commands(guild=GUILD)
-    await bot.tree.sync(guild=GUILD)
-    print("✅ Slash commands synced to 1 server")
+    if GUILD:
+        await bot.tree.clear_commands(guild=GUILD)
+        await bot.tree.sync(guild=GUILD)
+        print("✅ Slash commands synced to 1 server")
+    else:
+        await bot.tree.sync()
+        print("⚠️ GUILD_ID олдсонгүй. Commands global-оор sync хийгдлээ.")
 
     asyncio.create_task(session_timeout_checker())
     asyncio.create_task(github_auto_commit())
