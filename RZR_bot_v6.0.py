@@ -23,10 +23,12 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
+GUILD_ID = int(os.getenv("GUILD_ID")) if os.getenv("GUILD_ID") else None
+
 
 
 # 📁 Файлын замууд (Render Volume: /mnt/data биш харин local path)
-BASE_DIR = "/mnt/data"
+BASE_DIR = "/render_disks/rzr-disk"
 
 SCORE_FILE = f"{BASE_DIR}/scores.json"
 MATCH_LOG_FILE = f"{BASE_DIR}/match_log.json"
@@ -1477,30 +1479,21 @@ async def backup_now(interaction: discord.Interaction):
 # 🔄 Bot ажиллах үед
 @bot.event
 async def on_ready():
-    print("✅ Bot ready")
+    print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
+    print("📁 Working directory:", os.getcwd())
+    print(f"📡 GUILD_ID: {GUILD_ID}")
+
     try:
-        print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
-        print("📁 Working directory:", os.getcwd())
-
-        # GitHub-с score татах
-        copy_scores_from_github()
-
-        # 🛠️ GUILD_ID ашиглан зөвхөн 1 server-т sync хийх
-        GUILD_ID = os.getenv("GUILD_ID")
         if GUILD_ID:
-            guild = discord.Object(id=int(GUILD_ID))
-            await bot.tree.sync(guild=guild)
+            GUILD = discord.Object(id=GUILD_ID)
+            await bot.tree.sync(guild=GUILD)
             print(f"✅ Slash commands synced to GUILD_ID: {GUILD_ID}")
         else:
             await bot.tree.sync()
-            print("⚠️ GUILD_ID олдоогүй. Commands global-оор sync хийгдлээ.")
-
-        # Tasks эхлүүлнэ
-        asyncio.create_task(session_timeout_checker())
-        asyncio.create_task(github_auto_commit())
-
+            print("⚠️ GUILD_ID олдсонгүй. Commands global-оор sync хийгдлээ.")
     except Exception as e:
-        print(f"❌ on_ready error:", e)
+        print(f"❌ Slash command sync алдаа: {e}")
+
 
 
 
