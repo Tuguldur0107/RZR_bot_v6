@@ -1470,6 +1470,8 @@ async def on_ready():
     await bot.tree.clear_commands(guild=GUILD) 
     await bot.tree.sync(guild=GUILD)
     print("✅ Slash commands synced to 1 server")
+    print("GUILD:", GUILD)
+
 
     asyncio.create_task(session_timeout_checker())   # ⏱ 24 цагийн session шалгагч
     asyncio.create_task(github_auto_commit())        # ⏱ 60 минутын GitHub backup task
