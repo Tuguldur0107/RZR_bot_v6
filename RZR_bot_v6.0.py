@@ -11,6 +11,9 @@ import openai
 import requests
 from keep_alive import keep_alive
 from dotenv import load_dotenv
+import base64
+from github_commit import commit_to_github
+
 load_dotenv()
 print("🧪 ENV LOADED", os.getenv("GUILD_ID")) 
 
@@ -60,8 +63,6 @@ TEAM_SETUP = {
     "players_per_team": 5,
     "teams": []
 }
-
-
 
 # 1. Flask server thread-ээр ажиллуулна
 def keep_alive():
@@ -259,44 +260,26 @@ def commit_to_github_multi(file_list, message="update"):
 
 
 # Файлын хамгийн сүүлд өөрчлөгдсөн хугацааг хадгалах dictionary
-last_modified_times = {}
-
 async def github_auto_commit():
     await bot.wait_until_ready()
     while not bot.is_closed():
         try:
-            print("🕒 GitHub commit task ажиллаж байна...")
-            file_list = [
-                SCORE_FILE,
-                MATCH_LOG_FILE,
-                LAST_FILE,
-                SHIELD_FILE,
-                DONATOR_FILE,
-                SCORE_LOG_FILE
-            ]
+            from github_commit import commit_to_github
 
-            # Шалгах - аль файлууд өөрчлөгдсөн байна вэ?
-            changed_files = []
-            for filepath in file_list:
-                if not os.path.exists(filepath):
-                    continue
-                mtime = os.path.getmtime(filepath)
-                last_mtime = last_modified_times.get(filepath)
-                if last_mtime is None or mtime > last_mtime:
-                    changed_files.append(filepath)
-                    last_modified_times[filepath] = mtime
+            commit_to_github("data/scores.json", "auto: scores.json")
+            commit_to_github("data/donators.json", "auto: donators.json")
+            commit_to_github("data/score_log.jsonl", "auto: score_log.jsonl")
+            commit_to_github("data/match_log.json", "auto: match_log.json")
+            commit_to_github("data/last_match.json", "auto: last_match.json")
+            commit_to_github("data/donate_shields.json", "auto: donate_shields.json")
+            commit_to_github("data/player_stats.json", "auto: player_stats.json")
 
-            if changed_files:
-                print(f"🔄 {len(changed_files)} файл шинэчлэгдсэн тул backup хийж байна...")
-                commit_to_github_multi(changed_files, "⏱ Автомат GitHub commit (60мин)")
-
-            else:
-                print("✅ Файл шинэчлэгдээгүй байна, backup хийх шаардлагагүй.")
-
+            print("✅ GitHub-д 60 минутаар автоматаар backup хийгдлээ.")
         except Exception as e:
-            print("❌ GitHub commit task error:", e)
+            print("❌ GitHub auto commit алдаа:", e)
 
-        await asyncio.sleep(3600)  # 60 минут хүлээх
+        await asyncio.sleep(3600)  # 60 минут
+
 
 # ⏱ Session хугацаа дууссан эсэх шалгагч task
 async def session_timeout_checker():
@@ -1639,10 +1622,9 @@ async def on_message(message):
         copy_donators_from_github()
     except Exception as e:
         print(f"❌ copy_donators_from_github алдаа: {e}")
-    
-    print("📁 SCORE_FILE =", SCORE_FILE)
 
     await bot.process_commands(message)
+    asyncio.create_task(github_auto_commit())
 
 
 # 🎯 2. main() бол зөвхөн bot-г эхлүүлэх л үүрэгтэй байх ёстой
