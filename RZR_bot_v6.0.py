@@ -6,8 +6,7 @@ import os
 import json
 from datetime import datetime, timezone, timedelta
 import pytz
-from openai import OpenAI
-
+import openai
 
 MN_TZ = pytz.timezone("Asia/Ulaanbaatar")
 
@@ -21,7 +20,7 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+
 GUILD = discord.Object(id=int(os.getenv("GUILD_ID")))
 
 # 📁 Файлын замууд (Render Volume: /mnt/data биш харин local path)
@@ -451,8 +450,8 @@ JSON зөвхөн дараах бүтэцтэй буцаа:
     print("📡 GPT-д хүсэлт илгээж байна...")
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You're a helpful assistant that balances teams."},
                 {"role": "user", "content": prompt}
@@ -460,7 +459,6 @@ JSON зөвхөн дараах бүтэцтэй буцаа:
             temperature=0.0,
             max_tokens=1024,
             seed=42,
-            response_format="json"
         )
     except Exception as e:
         print("❌ GPT API error:", e)
