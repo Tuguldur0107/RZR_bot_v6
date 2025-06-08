@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 import pytz
 import openai
 import requests
+from keep_alive import keep_alive
 
 MN_TZ = pytz.timezone("Asia/Ulaanbaatar")
 
@@ -56,11 +57,6 @@ TEAM_SETUP = {
     "players_per_team": 5,
     "teams": []
 }
-
-
-
-
-
 
 def copy_scores_from_github():
     url = "https://raw.githubusercontent.com/Tuguldur0107/RZR_bot_v6/main/scores.json"
@@ -1492,12 +1488,9 @@ async def on_ready():
     asyncio.create_task(session_timeout_checker())
     asyncio.create_task(github_auto_commit())
 
-
-
-
 # 🟢 Run bot
 if __name__ == "__main__":
-    print("✅ TOKEN байна. Bot ажиллуулж эхэлж байна.")
+    keep_alive()  # 🔥 Render-д port нээж өгөх Flask-тай холбоос
     if TOKEN:
         bot.run(TOKEN)
     else:
