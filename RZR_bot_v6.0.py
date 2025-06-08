@@ -168,6 +168,7 @@ def commit_to_github_multi(file_list, message="update"):
     import base64
     import requests
     import os
+    import json
 
     token = os.environ.get("GITHUB_TOKEN")
     repo = os.environ.get("GITHUB_REPO")
@@ -182,44 +183,83 @@ def commit_to_github_multi(file_list, message="update"):
         "Accept": "application/vnd.github+json"
     }
 
-    for filepath in file_list:
-        github_path = filepath.replace("\\", "/").split("/data/")[-1]
-        github_path = "data/" + github_path  # data хавтас хадгалах
+    # 1. Эхлээд тухайн branch дээрх сүүлийн commit-аас sha авч байна
+    url = f"https://api.github.com/repos/{repo}/git/refs/heads/{branch}"
+    res = requests.get(url, headers=headers)
+    if not res.ok:
+        print(f"❌ GitHub branch sha авахад алдаа: {res.status_code}")
+        return
+    branch_sha = res.json()["object"]["sha"]
 
+    # 2. commit-аас tree авах
+    url = f"https://api.github.com/repos/{repo}/git/commits/{branch_sha}"
+    res = requests.get(url, headers=headers)
+    if not res.ok:
+        print(f"❌ GitHub commit tree авахад алдаа: {res.status_code}")
+        return
+    base_tree_sha = res.json()["tree"]["sha"]
+
+    # 3. commit-д оруулах файлуудыг tree бүрдүүлэлтэнд нэмэх
+    tree_items = []
+    for filepath in file_list:
         try:
             with open(filepath, "rb") as f:
-                content = base64.b64encode(f.read()).decode("utf-8")
+                content = f.read()
+                encoded_content = base64.b64encode(content).decode("utf-8")
         except Exception as e:
-            print(f"⚠️ {github_path} файл уншихад алдаа гарлаа:", e)
+            print(f"⚠️ {filepath} файл уншихад алдаа гарлаа: {e}")
             continue
 
-        url = f"https://api.github.com/repos/{repo}/contents/{github_path}"
-
-        # 📝 Одоогийн GitHub дахь файлын content авах
-        res = requests.get(url, headers=headers, params={"ref": branch})
-        if res.ok:
-            github_file_sha = res.json().get("sha")
-            github_file_content = res.json().get("content", "").replace("\n", "")
-            # Өөрчлөгдсөн эсэхийг шалгах
-            if content == github_file_content:
-                print(f"ℹ️ {github_path} өөрчлөгдөөгүй тул commit хийхгүй.")
-                continue
+        github_path = filepath.replace("\\", "/")
+        if "/data/" in github_path:
+            github_path = "data/" + github_path.split("/data/")[-1]
         else:
-            github_file_sha = None
+            github_path = os.path.basename(filepath)
 
-        data = {
-            "message": message,
-            "branch": branch,
-            "content": content
-        }
-        if github_file_sha:
-            data["sha"] = github_file_sha
+        tree_items.append({
+            "path": github_path,
+            "mode": "100644",
+            "type": "blob",
+            "content": content.decode(errors="ignore")  # GitHub-д text content оруулна
+        })
 
-        r = requests.put(url, headers=headers, json=data)
-        if r.status_code in [200, 201]:
-            print(f"✅ {github_path} GitHub-д хадгалагдлаа.")
-        else:
-            print(f"❌ {github_path} commit алдаа:", r.status_code, r.text)
+    # 4. Шинэ tree үүсгэх
+    url = f"https://api.github.com/repos/{repo}/git/trees"
+    data = {
+        "base_tree": base_tree_sha,
+        "tree": tree_items
+    }
+    res = requests.post(url, headers=headers, json=data)
+    if not res.ok:
+        print(f"❌ GitHub tree үүсгэхэд алдаа: {res.status_code} {res.text}")
+        return
+    new_tree_sha = res.json()["sha"]
+
+    # 5. Шинэ commit үүсгэх
+    url = f"https://api.github.com/repos/{repo}/git/commits"
+    data = {
+        "message": message,
+        "tree": new_tree_sha,
+        "parents": [branch_sha]
+    }
+    res = requests.post(url, headers=headers, json=data)
+    if not res.ok:
+        print(f"❌ GitHub commit үүсгэхэд алдаа: {res.status_code} {res.text}")
+        return
+    new_commit_sha = res.json()["sha"]
+
+    # 6. Branch-ийг шинэ commit руу шилжүүлэх
+    url = f"https://api.github.com/repos/{repo}/git/refs/heads/{branch}"
+    data = {
+        "sha": new_commit_sha
+    }
+    res = requests.patch(url, headers=headers, json=data)
+    if not res.ok:
+        print(f"❌ GitHub branch update алдаа: {res.status_code} {res.text}")
+        return
+
+    print(f"✅ {len(tree_items)} файлыг GitHub руу багцлаад commit хийлээ.")
+
 
 
 def commit_to_github_multi(file_list, message="update"):
@@ -1545,8 +1585,6 @@ async def backup_now(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Backup хийхэд алдаа гарлаа: {e}")
 
 
-
-# 🔄 Bot ажиллах үед
 @bot.event
 async def on_ready():
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
@@ -1561,7 +1599,7 @@ async def on_ready():
 
     # 🧠 Task-уудыг эхлүүлэх
     asyncio.create_task(session_timeout_checker())
-    asyncio.create_task(github_auto_commit())
+    asyncio.create_task(commit_to_github_multi())
 
 @bot.event
 async def on_message(message):
