@@ -1590,7 +1590,7 @@ async def whois(interaction: discord.Interaction, mention: str):
 
 
 print(bot)  # bot объектийг print хий — id нь ямар байна?
-
+# 🎯 1. event-үүд function-ий гадна байж таарна
 @bot.event
 async def on_ready():
     print("✅ on_ready ажиллалаа")
@@ -1604,18 +1604,14 @@ async def on_ready():
     try:
         copy_donators_from_github()
     except Exception as e:
-        print(f"❌ copy_scores_from_github алдаа: {e}")
+        print(f"❌ copy_donators_from_github алдаа: {e}")
 
-    # Дэмжих Guild бүрт команд sync хийх
     for guild in bot.guilds:
         bot.tree.copy_global_to(guild=guild)
         await bot.tree.sync(guild=guild)
         print(f"✅ Slash commands synced: {guild.name} ({guild.id})")
 
-    # Task-уудыг эхлүүлэх
     asyncio.create_task(session_timeout_checker())
-    #asyncio.create_task(github_auto_commit())
-
 
 @bot.event
 async def on_message(message):
@@ -1639,6 +1635,7 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
+# 🎯 2. main() бол зөвхөн bot-г эхлүүлэх л үүрэгтэй байх ёстой
 async def main():
     from keep_alive import keep_alive
     keep_alive()
@@ -1650,5 +1647,7 @@ async def main():
     print("🚀 Bot эхлэх гэж байна...")
     await bot.start(DISCORD_TOKEN)
 
+
+# 🎯 3. run main
 if __name__ == "__main__":
     asyncio.run(main())
