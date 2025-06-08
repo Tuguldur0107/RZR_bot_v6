@@ -7,6 +7,7 @@ import json
 from datetime import datetime, timezone, timedelta
 import pytz
 import openai
+import requests
 
 MN_TZ = pytz.timezone("Asia/Ulaanbaatar")
 
@@ -61,6 +62,20 @@ TEAM_SETUP = {
 
 
 
+def copy_scores_from_github():
+    url = "https://raw.githubusercontent.com/Tuguldur0107/RZR_bot_v6/main/scores.json"
+    local_path = SCORE_FILE
+
+    try:
+        r = requests.get(url)
+        if r.status_code == 200:
+            with open(local_path, "w", encoding="utf-8") as f:
+                f.write(r.text)
+            print("✅ GitHub-с scores.json хууллаа.")
+        else:
+            print(f"❌ GitHub-с татаж чадсангүй: {r.status_code}")
+    except Exception as e:
+        print("❌ GitHub fetch алдаа:", e)
 
 def now_mongolia():
     return datetime.now(MN_TZ)
@@ -1359,16 +1374,10 @@ async def donator_list(interaction: discord.Interaction):
             emoji = get_donator_emoji(data)
             total = data.get("total_mnt", 0)
             tier = scores.get(uid, {}).get("tier", "4-1")
-
-            display_name = member.display_name
-            for prefix in TIER_ORDER:
-                if display_name.startswith(f"{prefix} |"):
-                    display_name = display_name[len(prefix) + 2:].strip()
-                    break
+            display_name = clean_nickname(member.display_name)
 
             display = f"{emoji} {tier} | {display_name}" if emoji else f"{tier} | {display_name}"
             msg += f"{display} — {total:,}₮\n"
-
 
     await interaction.followup.send(msg)
 
@@ -1469,12 +1478,13 @@ async def backup_now(interaction: discord.Interaction):
 # 🔄 Bot ажиллах үед
 @bot.event
 async def on_ready():
+    copy_scores_from_github()
+
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
 
     for guild in bot.guilds:
-        bot.tree.copy_global_to(guild=guild)           # await биш
-        await bot.tree.sync(guild=guild)               # await хэрэгтэй
+        await bot.tree.sync(guild=guild)  # ✅ Зөв: зөвхөн sync() ашиглахад хангалттай
         print(f"✅ Slash commands synced to: {guild.name} ({guild.id})")
 
     asyncio.create_task(session_timeout_checker())
