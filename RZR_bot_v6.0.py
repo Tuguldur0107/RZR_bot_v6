@@ -1527,11 +1527,13 @@ async def on_ready():
 
 # ⏳ Main function-г async-аар эхлүүлнэ
 async def main():
+    copy_donators_from_github()
     keep_alive()  # Thread дээр ажиллуулдаг бол OK
     await bot.start(TOKEN)  # ⚠️ Зөвхөн async function дотроос дуудна
     #copy_scores_from_github()
-    copy_donators_from_github()
+    
 
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
+    
