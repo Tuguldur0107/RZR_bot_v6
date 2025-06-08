@@ -63,6 +63,25 @@ TEAM_SETUP = {
     "teams": []
 }
 
+
+
+# 1. Flask server thread-ээр ажиллуулна
+def keep_alive():
+    from flask import Flask
+    from threading import Thread
+
+    app = Flask('')
+
+    @app.route('/')
+    def home():
+        return "✅ I'm alive"
+
+    def run():
+        app.run(host='0.0.0.0', port=8080)
+
+    t = Thread(target=run)
+    t.start()
+
 def copy_scores_from_github():
     url = "https://raw.githubusercontent.com/Tuguldur0107/RZR_bot_v6/main/scores.json"
     local_path = SCORE_FILE
@@ -164,12 +183,7 @@ def commit_to_github_multi(file_list, message="update"):
     }
 
     for filepath in file_list:
-        # ✅ GitHub path-ийг тохируулна (data/ хавтсыг хадгална)
-        filepath = filepath.replace("\\", "/")  # Windows path засвар
-        if "/data/" in filepath:
-            github_path = "data/" + filepath.split("/data/")[-1]
-        else:
-            github_path = os.path.basename(filepath)
+        github_path = os.path.basename(filepath)
 
         try:
             with open(filepath, "rb") as f:
@@ -180,10 +194,24 @@ def commit_to_github_multi(file_list, message="update"):
 
         url = f"https://api.github.com/repos/{repo}/contents/{github_path}"
 
+        # 📥 sha авах (хуучин commit байвал)
         res = requests.get(url, headers=headers, params={"ref": branch})
         sha = res.json().get("sha") if res.ok else None
 
         data = {
+            "message": message,
+            "branch": branch,
+            "content": content
+        }
+        if sha:
+            data["sha"] = sha
+
+        # 🚀 Commit хийнэ
+        r = requests.put(url, headers=headers, json=data)
+        if r.status_code in [200, 201]:
+            print(f"✅ {github_path} GitHub-д хадгалагдлаа.")
+        else:
+            print(f"❌ {github_path} commit алдаа:", r.status_code, r.text)
 
 # ⏱ Session хугацаа дууссан эсэх шалгагч task
 async def session_timeout_checker():
@@ -1467,6 +1495,7 @@ async def backup_now(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Backup хийхэд алдаа гарлаа: {e}")
 
 
+
 # 🔄 Bot ажиллах үед
 @bot.event
 async def on_ready():
@@ -1485,13 +1514,11 @@ async def on_ready():
     except Exception as e:
         print(f"❌ Slash command sync алдаа: {e}")
 
+# ⏳ Main function-г async-аар эхлүүлнэ
+async def main():
+    keep_alive()  # Thread дээр ажиллуулдаг бол OK
+    await bot.start(TOKEN)  # ⚠️ Зөвхөн async function дотроос дуудна
 
-
-
-# 🟢 Run bot
 if __name__ == "__main__":
-    keep_alive()  # 🔥 Render-д port нээж өгөх Flask-тай холбоос
-    if TOKEN:
-        bot.run(TOKEN)
-    else:
-        print("❌ DISCORD_TOKEN орчны хувьсагч тохируулаагүй байна.")
+    import asyncio
+    asyncio.run(main())
