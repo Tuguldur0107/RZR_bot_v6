@@ -97,6 +97,25 @@ def copy_scores_from_github():
     except Exception as e:
         print("❌ GitHub fetch алдаа:", e)
 
+def copy_donators_from_github():
+    url = "https://raw.githubusercontent.com/Tuguldur0107/RZR_bot_v6/main/donators.json"
+    local_path = DONATOR_FILE
+
+    try:
+        r = requests.get(url)
+        if r.status_code == 200:
+            with open(local_path, "w", encoding="utf-8") as f:
+                f.write(r.text)
+            print("✅ GitHub-с donators.json хууллаа.")
+        else:
+            print(f"❌ GitHub-с татаж чадсангүй: {r.status_code}")
+    except Exception as e:
+        print("❌ GitHub fetch алдаа:", e)
+
+
+
+
+
 def now_mongolia():
     return datetime.now(MN_TZ)
   
@@ -352,7 +371,6 @@ def update_player_stats(winners, losers, undo=False):
 
     save_json(PLAYER_STATS_FILE, stats)
 
-
 def append_match_log(teams, winner_team, initiator_id, mode="manual"):
     if not os.path.exists(MATCH_LOG_FILE):
         match_log = []
@@ -511,14 +529,10 @@ JSON зөвхөн дараах бүтэцтэй буцаа:
 
 
 
-
 @bot.tree.command(name="ping", description="Ботын latency-г шалгана")
 async def ping(interaction: discord.Interaction):
     latency_ms = round(bot.latency * 1000)
     await interaction.response.send_message(f"🏓 Pong! Latency: {latency_ms}ms", ephemeral=True)
-
-
-
 
 @bot.tree.command(name="start_match", description="Session эхлүүлнэ, багийн тоо болон тоглогчийн тоог тохируулна")
 @app_commands.describe(team_count="Хэдэн багтай байх вэ", players_per_team="Нэг багт хэдэн хүн байх вэ")
@@ -839,9 +853,6 @@ async def go_gpt(interaction: discord.Interaction):
         lines.append(f"\n⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {mentions}")
 
     await interaction.followup.send("\n".join(lines))
-
-
-
 
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
 @app_commands.describe(winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)")
@@ -1518,6 +1529,8 @@ async def on_ready():
 async def main():
     keep_alive()  # Thread дээр ажиллуулдаг бол OK
     await bot.start(TOKEN)  # ⚠️ Зөвхөн async function дотроос дуудна
+    #copy_scores_from_github()
+    copy_donators_from_github()
 
 if __name__ == "__main__":
     import asyncio
