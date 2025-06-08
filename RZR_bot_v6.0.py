@@ -1637,7 +1637,7 @@ async def on_message(message):
 # 🎯 2. main() бол зөвхөн bot-г эхлүүлэх л үүрэгтэй байх ёстой
 async def main():
     from keep_alive import keep_alive
-    #keep_alive()
+    keep_alive()
 
     if not DISCORD_TOKEN:
         print("❌ DISCORD_TOKEN тохируулагдаагүй байна.")
