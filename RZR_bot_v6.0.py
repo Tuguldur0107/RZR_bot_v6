@@ -1483,7 +1483,8 @@ async def backup_now(interaction: discord.Interaction):
 async def on_ready():
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
-    print("GUILD ID:", GUILD_ID)
+
+    print("🔎 GUILD_ID =", repr(GUILD_ID), "| type:", type(GUILD_ID))  # ← ЭНЭ МӨР энд нэмж тавь
 
     if GUILD:
         await bot.tree.clear_commands(guild=GUILD)
@@ -1492,9 +1493,6 @@ async def on_ready():
     else:
         await bot.tree.sync()
         print("⚠️ GUILD_ID олдсонгүй. Commands global-оор sync хийгдлээ.")
-
-    asyncio.create_task(session_timeout_checker())
-    asyncio.create_task(github_auto_commit())
 
 
 
