@@ -1467,10 +1467,12 @@ async def backup_now(interaction: discord.Interaction):
 async def on_ready():
     print(f"🤖 RZR Bot v6.0 ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
+    print("GUILD:", GUILD)
+
+
     await bot.tree.clear_commands(guild=GUILD) 
     await bot.tree.sync(guild=GUILD)
     print("✅ Slash commands synced to 1 server")
-    print("GUILD:", GUILD)
 
 
     asyncio.create_task(session_timeout_checker())   # ⏱ 24 цагийн session шалгагч
