@@ -1590,8 +1590,6 @@ async def whois(interaction: discord.Interaction, mention: str):
 
 
 print(bot)  # bot объектийг print хий — id нь ямар байна?
-async def main():
-    keep_alive()
 
 @bot.event
 async def on_ready():
@@ -1641,14 +1639,16 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
+async def main():
+    from keep_alive import keep_alive
+    keep_alive()
 
     if not DISCORD_TOKEN:
         print("❌ DISCORD_TOKEN тохируулагдаагүй байна.")
         return
+
+    print("🚀 Bot эхлэх гэж байна...")
     await bot.start(DISCORD_TOKEN)
-    
 
 if __name__ == "__main__":
-    print("🚀 Starting bot...")
-    #copy_donators_from_github()
     asyncio.run(main())
