@@ -262,6 +262,7 @@ def commit_to_github_multi(file_list, message="update"):
 # Файлын хамгийн сүүлд өөрчлөгдсөн хугацааг хадгалах dictionary
 async def github_auto_commit():
     await bot.wait_until_ready()
+    await asyncio.sleep(3600)
     while not bot.is_closed():
         try:
             from github_commit import commit_to_github
