@@ -22,6 +22,7 @@ GITHUB_REPO = os.getenv("GITHUB_REPO")
 
 
 client = OpenAI(api_key=OPENAI_API_KEY)
+GUILD = discord.Object(id=int(os.getenv("GUILD_ID")))
 
 # 📁 Файлын замууд (Render Volume: /mnt/data биш харин local path)
 BASE_DIR = "data"
@@ -1471,13 +1472,13 @@ async def backup_now(interaction: discord.Interaction):
 async def on_ready():
     print(f"🤖 RZR Bot v6.0 ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
+    await bot.tree.sync(guild=GUILD)
+    print("✅ Slash commands synced to 1 server")
 
-    for guild in bot.guilds:
-        bot.tree.copy_global_to(guild=guild)
-        await bot.tree.sync(guild=guild)
-        print(f"✅ Synced: {guild.name} ({guild.id})")
     asyncio.create_task(session_timeout_checker())   # ⏱ 24 цагийн session шалгагч
     asyncio.create_task(github_auto_commit())        # ⏱ 60 минутын GitHub backup task
+
+
 
 # 🟢 Run bot
 if __name__ == "__main__":
