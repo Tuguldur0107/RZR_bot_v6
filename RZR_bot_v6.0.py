@@ -1582,6 +1582,10 @@ async def whois(interaction: discord.Interaction, mention: str):
     except Exception as e:
         await interaction.response.send_message(f"❌ Олдсонгүй: {e}")
 
+@bot.tree.command(name="debug_id", description="Таны Discord ID-г харуулна")
+async def debug_id(interaction: discord.Interaction):
+    await interaction.response.send_message(f"🆔 Таны Discord ID: `{interaction.user.id}`", ephemeral=True)
+
 
 print(bot)  # bot объектийг print хий — id нь ямар байна?
 # 🎯 1. event-үүд function-ий гадна байж таарна
