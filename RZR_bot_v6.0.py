@@ -18,7 +18,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
-GUILD_ID = os.getenv("GUILD_ID") 
+
 
 # 📁 Файлын замууд (Render Volume: /mnt/data биш харин local path)
 BASE_DIR = "/mnt/data"
@@ -55,19 +55,6 @@ TEAM_SETUP = {
     "players_per_team": 5,
     "teams": []
 }
-
-GUILD_ID = os.getenv("GUILD_ID")
-print("🔎 GUILD_ID =", repr(GUILD_ID), "| type:", type(GUILD_ID))  # илүү нарийн хэвлэ
-
-if GUILD_ID:
-    try:
-        GUILD = discord.Object(id=int(GUILD_ID.strip()))
-    except Exception as e:
-        print("❌ GUILD ID-г int болгоход алдаа гарлаа:", e)
-        GUILD = None
-else:
-    print("⚠️ GUILD_ID олдсонгүй!")
-    GUILD = None
 
 
 
@@ -1480,20 +1467,20 @@ async def backup_now(interaction: discord.Interaction):
 
 
 # 🔄 Bot ажиллах үед
+# 🔄 Bot ажиллах үед
 @bot.event
 async def on_ready():
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
 
-    print("🔎 GUILD_ID =", repr(GUILD_ID), "| type:", type(GUILD_ID))  # ← ЭНЭ МӨР энд нэмж тавь
+    for guild in bot.guilds:
+        await bot.tree.copy_global_to(guild=guild)
+        await bot.tree.sync(guild=guild)
+        print(f"✅ Slash commands synced to: {guild.name} ({guild.id})")
 
-    if GUILD:
-        await bot.tree.clear_commands(guild=GUILD)
-        await bot.tree.sync(guild=GUILD)
-        print("✅ Slash commands synced to 1 server")
-    else:
-        await bot.tree.sync()
-        print("⚠️ GUILD_ID олдсонгүй. Commands global-оор sync хийгдлээ.")
+    asyncio.create_task(session_timeout_checker())
+    asyncio.create_task(github_auto_commit())
+
 
 
 
