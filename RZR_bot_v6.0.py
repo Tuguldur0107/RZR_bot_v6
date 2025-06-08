@@ -1589,7 +1589,7 @@ async def backup_now(interaction: discord.Interaction):
 async def on_ready():
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
-    copy_donators_from_github()
+    
 
     # 🔄 Дэмжих Guild бүрт команд sync хийх
     for guild in bot.guilds:
@@ -1629,6 +1629,7 @@ async def main():
         print("❌ DISCORD_TOKEN тохируулагдаагүй байна.")
         return
     await bot.start(DISCORD_TOKEN)
+    copy_donators_from_github()
 
 if __name__ == "__main__":
     print("🚀 Starting bot...")
