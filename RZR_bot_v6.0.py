@@ -593,12 +593,11 @@ JSON зөвхөн дараах бүтэцтэй буцаа:
         raise
 
 # ⚙️ Discord intents
-intents = discord.Intents.default()
-intents.message_content = True
-intents.guilds = True
 intents = discord.Intents.all()
 
 bot = commands.Bot(command_prefix="/", intents=intents)
+
+
 
 
 
