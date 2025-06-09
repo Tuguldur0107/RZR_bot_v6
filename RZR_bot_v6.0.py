@@ -596,7 +596,7 @@ JSON зөвхөн дараах бүтэцтэй буцаа:
 
 # ⚙️ Discord intents
 intents = discord.Intents.all()
-
+intents.members = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 def remove_last_match_log():
@@ -820,29 +820,26 @@ async def go_bot(interaction: discord.Interaction):
         await interaction.followup.send("⚠️ Session идэвхгүй байна.", ephemeral=True)
         return
 
-    team_count = TEAM_SETUP.get("team_count")
-    players_per_team = TEAM_SETUP.get("players_per_team")
-    player_ids = TEAM_SETUP.get("player_ids", [])
+    team_count = TEAM_SETUP["team_count"]
+    players_per_team = TEAM_SETUP["players_per_team"]
     total_slots = team_count * players_per_team
+    player_ids = TEAM_SETUP["player_ids"]
 
-    if len(player_ids) < total_slots:
-        await interaction.followup.send(
-            f"⚠️ {team_count} баг бүрдэхийн тулд нийт {total_slots} тоглогч бүртгэгдэх ёстой, одоогоор {len(player_ids)} байна."
-        )
+    if not player_ids:
+        await interaction.followup.send("⚠️ Бүртгэгдсэн тоглогч алга байна.", ephemeral=True)
         return
 
     scores = load_scores()
-    all_weights = {
+    weights_all = {
         uid: tier_score(scores.get(str(uid), {}))
         for uid in player_ids
     }
 
-    # Оноогоор эрэмбэлж хамгийн сайн total_slots-г сонгоно
-    sorted_players = sorted(all_weights.items(), key=lambda x: x[1], reverse=True)
+    # Оноогоор эрэмбэлнэ
+    sorted_players = sorted(weights_all.items(), key=lambda x: x[1], reverse=True)
     trimmed_players = sorted_players[:total_slots]
-    left_out_players = sorted_players[total_slots:]
-
     player_weights = dict(trimmed_players)
+    left_out_players = sorted_players[total_slots:]
 
     snake = snake_teams(player_weights, team_count, players_per_team)
     greedy = greedy_teams(player_weights, team_count, players_per_team)
@@ -871,6 +868,7 @@ async def go_bot(interaction: discord.Interaction):
         "initiator": interaction.user.id
     }
     append_to_json_list(MATCH_LOG_FILE, match_data)
+    save_session()
 
     guild = interaction.guild
     lines = []
@@ -880,27 +878,24 @@ async def go_bot(interaction: discord.Interaction):
         leader_name = guild.get_member(leader_uid).display_name if guild.get_member(leader_uid) else str(leader_uid)
 
         lines.append(f"# {i}-р баг (нийт оноо: {team_total})\n")
-
         for uid in team:
             member = guild.get_member(uid)
-            name = member.display_name if member else f"{uid}"
-            weight = player_weights.get(uid, 0)
+            name = member.display_name if member else str(uid)
+            score = player_weights.get(uid, 0)
             if uid == leader_uid:
-                lines.append(f"{name} ({weight}) 😎 Team Leader\n")
+                lines.append(f"{name} ({score}) 😎 Team Leader\n")
             else:
-                lines.append(f"{name} ({weight})\n")
-
+                lines.append(f"{name} ({score})\n")
         lines.append("\n")
 
     if left_out_players:
-        left_mentions = "\n• ".join(f"<@{uid}>" for uid, _ in left_out_players)
-        lines.append(f"⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {left_mentions}")
+        mentions = "\n• ".join(f"<@{uid}>" for uid, _ in left_out_players)
+        lines.append(f"⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {mentions}")
 
     await interaction.followup.send(
         f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{min(snake_diff, greedy_diff)}`)\n\n" + "".join(lines)
     )
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
-    save_session()
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 async def go_gpt(interaction: discord.Interaction):
@@ -1525,8 +1520,8 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
             failed.append(uid)
             continue
 
-        if not member:
-            print(f"❌ {uid} member object олдсонгүй.")
+        if not isinstance(member, discord.Member):
+            print(f"⚠️ {uid} fetch-ийн үр дүн discord.Member биш байна. Алгаслаа.")
             failed.append(uid)
             continue
 
@@ -1561,8 +1556,11 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
     save_json(SCORE_FILE, scores)
     print("💾 scores.json хадгалагдлаа")
 
-    await update_nicknames_for_users(interaction.guild, updated_ids)
-    print("🎭 nickname update дууслаа")
+    try:
+        await update_nicknames_for_users(interaction.guild, updated_ids)
+        print("🎭 nickname update дууслаа")
+    except Exception as e:
+        print(f"⚠️ nickname update-д алдаа гарлаа: {e}")
 
     msg = []
     if updated_ids:
@@ -1575,7 +1573,6 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
     print("📨 Бот reply илгээж байна...")
     await interaction.followup.send("\n".join(msg))
     print("✅ add_score амжилттай дууслаа")
-
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
 @app_commands.describe(
