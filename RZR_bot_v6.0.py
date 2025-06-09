@@ -1512,18 +1512,20 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
 
     for uid in user_ids:
         print(f"🔍 Хэрэглэгч шалгаж байна: {uid}")
-        try:
-            member = await interaction.guild.fetch_member(uid)
-            print(f"✅ fetch_member OK: {member.display_name}")
-        except Exception as e:
-            print(f"❌ {uid} fetch_member алдаа: {e}")
-            failed.append(uid)
-            continue
+        member = interaction.guild.get_member(uid)
 
-        if not isinstance(member, discord.Member):
-            print(f"⚠️ {uid} fetch-ийн үр дүн discord.Member биш байна. Алгаслаа.")
-            failed.append(uid)
-            continue
+        if not member:
+            try:
+                member = await asyncio.wait_for(interaction.guild.fetch_member(uid), timeout=2.0)
+                print(f"✅ fetch_member OK: {member.display_name}")
+            except asyncio.TimeoutError:
+                print(f"⏱ {uid} fetch_member timeout боллоо.")
+                failed.append(uid)
+                continue
+            except Exception as e:
+                print(f"❌ {uid} fetch_member алдаа: {e}")
+                failed.append(uid)
+                continue
 
         uid_str = str(uid)
         data = scores.get(uid_str, get_default_tier())
