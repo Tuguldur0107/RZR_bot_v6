@@ -1527,11 +1527,16 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         scores[uid_str] = data
         updated.append(uid)
 
+        # 🧾 Онооны лог бүртгэнэ
+        reason = f"add_score_by_{interaction.user.id}"
+        log_score_transaction(uid_str, points, data["score"], data["tier"], reason=reason)
+
     save_json(SCORE_FILE, scores)
     await update_nicknames_for_users(interaction.guild, updated)
 
     mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
     await interaction.followup.send(f"✅ Оноо {points:+} – {mentions_text}")
+
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
 @app_commands.describe(
