@@ -786,23 +786,29 @@ async def clear_match(interaction: discord.Interaction):
         return
 
     try:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
 
-    # 🧹 Багийн бүртгэл цэвэрлэнэ
+    # 🧹 Match session болон багуудыг цэвэрлэнэ
     TEAM_SETUP["teams"] = []
     GAME_SESSION["active"] = False
     GAME_SESSION["start_time"] = None
     GAME_SESSION["last_win_time"] = None
-    
-    if TEAM_SETUP["player_ids"]:
-        cleared_users = [f"<@{uid}>" for uid in TEAM_SETUP["player_ids"]]
-        await interaction.followup.send(f"⚠️ Дараах тоглогчдын бүртгэл цуцлагдлаа: {', '.join(cleared_users)}")
 
-    await interaction.followup.send("🧼 Match-ийн бүртгэл амжилттай цэвэрлэгдлээ.")
-    await interaction.followup.send("✅ Match бүртгэгдлээ.")
+    cleared_users = TEAM_SETUP["player_ids"][:]
+    TEAM_SETUP["player_ids"] = []
+
+    lines = []
+    if cleared_users:
+        mentions = ", ".join(f"<@{uid}>" for uid in cleared_users)
+        lines.append(f"⚠️ Дараах тоглогчдын бүртгэл цуцлагдлаа: {mentions}")
+
+    lines.append("🧼 Match-ийн бүртгэл амжилттай цэвэрлэгдлээ.")
+    lines.append("✅ Session хадгалагдлаа.")
+
     save_session()
+    await interaction.followup.send("\n".join(lines))
 
 @bot.tree.command(name="go_bot", description="Онооны дагуу тэнцвэртэй баг хуваарилна")
 async def go_bot(interaction: discord.Interaction):
@@ -987,7 +993,7 @@ async def go_gpt(interaction: discord.Interaction):
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
     save_session()
 
-@bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
+@bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өүрчилнө")
 @app_commands.describe(
     winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)",
     loser_teams="Ялагдсан багуудын дугаарууд (жишээ: 2 4)"
@@ -1005,7 +1011,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         return
 
     if not GAME_SESSION["active"] or not TEAM_SETUP.get("teams"):
-        await interaction.followup.send("⚠️ Session идэвхгүй эсвэл багууд бүрдээгүй байна.", ephemeral=True)
+        await interaction.followup.send("⚠️ Session идэвхгүй эсвэл багууд бүрдэгүй байна.", ephemeral=True)
         return
 
     try:
@@ -1032,6 +1038,20 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     def validate_tier(tier):
         return tier if tier in tier_list else "4-1"
 
+    def adjust_score(data, delta):
+        data["score"] += delta
+        if data["score"] >= 5:
+            cur_index = tier_list.index(data["tier"])
+            if cur_index + 1 < len(tier_list):
+                data["tier"] = tier_list[cur_index + 1]
+            data["score"] = 0
+        elif data["score"] <= -5:
+            cur_index = tier_list.index(data["tier"])
+            if cur_index - 1 >= 0:
+                data["tier"] = tier_list[cur_index - 1]
+            data["score"] = 0
+        return data
+
     winner_details = []
     for uid in winners:
         uid_str = str(uid)
@@ -1039,28 +1059,11 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         old_score = data["score"]
         old_tier = data["tier"]
         data["tier"] = validate_tier(data.get("tier"))
-        data["score"] += 1
-
-        if data["score"] >= 5:
-            cur_index = tier_list.index(data["tier"])
-            if cur_index + 1 < len(tier_list):
-                data["tier"] = tier_list[cur_index + 1]
-            data["score"] = 0
-
+        data = adjust_score(data, +1)
         member = guild.get_member(uid)
         data["username"] = member.display_name if member else "Unknown"
         scores[uid_str] = data
-
-        winner_details.append({
-            "uid": uid,
-            "username": data["username"],
-            "team": next((i + 1 for i, team in enumerate(all_teams) if uid in team), None),
-            "old_score": old_score,
-            "new_score": data["score"],
-            "old_tier": old_tier,
-            "new_tier": data["tier"],
-            "delta": +1
-        })
+        winner_details.append({"uid": uid, "username": data["username"], "team": next((i + 1 for i, team in enumerate(all_teams) if uid in team), None), "old_score": old_score, "new_score": data["score"], "old_tier": old_tier, "new_tier": data["tier"], "delta": +1})
 
     loser_details = []
     for uid in losers:
@@ -1069,52 +1072,16 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         old_score = data["score"]
         old_tier = data["tier"]
         data["tier"] = validate_tier(data.get("tier"))
-        data["score"] -= 1
-
-        if data["score"] <= -5:
-            cur_index = tier_list.index(data["tier"])
-            if cur_index - 1 >= 0:
-                data["tier"] = tier_list[cur_index - 1]
-            data["score"] = 0
-
+        data = adjust_score(data, -1)
         member = guild.get_member(uid)
         data["username"] = member.display_name if member else "Unknown"
         scores[uid_str] = data
-
-        loser_details.append({
-            "uid": uid,
-            "username": data["username"],
-            "team": next((i + 1 for i, team in enumerate(all_teams) if uid in team), None),
-            "old_score": old_score,
-            "new_score": data["score"],
-            "old_tier": old_tier,
-            "new_tier": data["tier"],
-            "delta": -1
-        })
+        loser_details.append({"uid": uid, "username": data["username"], "team": next((i + 1 for i, team in enumerate(all_teams) if uid in team), None), "old_score": old_score, "new_score": data["score"], "old_tier": old_tier, "new_tier": data["tier"], "delta": -1})
 
     save_json(SCORE_FILE, scores)
-
-    log_score_transaction(
-        action="set_match_result",
-        winners=winners,
-        losers=losers,
-        initiator_id=interaction.user.id,
-        timestamp=now.isoformat()
-    )
-
-    teams = TEAM_SETUP["teams"]
-    append_match_log(teams, winners, interaction.user.id, mode="manual")
+    log_score_transaction("set_match_result", winners, losers, interaction.user.id, now.isoformat())
+    append_match_log(all_teams, winners, interaction.user.id, mode="manual")
     update_player_stats(winners, losers)
-
-    last_match = {
-        "timestamp": now.isoformat(),
-        "winner_team_indexes": win_indexes,
-        "winners": winner_details,
-        "losers": loser_details,
-        "by": interaction.user.id,
-        "by_username": interaction.user.display_name
-    }
-
     save_last_match(winners, losers)
     GAME_SESSION["last_win_time"] = now
 
@@ -1150,8 +1117,8 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     await interaction.followup.send("\n".join(lines))
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
     save_session()
-    
-@bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
+
+@bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өүрчилнө")
 @app_commands.describe(
     winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)",
     loser_teams="Ялагдсан багуудын дугаарууд (жишээ: 2 4)"
@@ -1169,7 +1136,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         return
 
     if not GAME_SESSION["active"] or not TEAM_SETUP.get("teams"):
-        await interaction.followup.send("⚠️ Session идэвхгүй эсвэл багууд бүрдээгүй байна.", ephemeral=True)
+        await interaction.followup.send("⚠️ Session идэвхгүй эсвэл багууд бүрдэгүй байна.", ephemeral=True)
         return
 
     try:
@@ -1196,6 +1163,20 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
     def validate_tier(tier):
         return tier if tier in tier_list else "4-1"
 
+    def adjust_score(data, delta):
+        data["score"] += delta
+        if data["score"] >= 5:
+            cur_index = tier_list.index(data["tier"])
+            if cur_index + 1 < len(tier_list):
+                data["tier"] = tier_list[cur_index + 1]
+            data["score"] = 0
+        elif data["score"] <= -5:
+            cur_index = tier_list.index(data["tier"])
+            if cur_index - 1 >= 0:
+                data["tier"] = tier_list[cur_index - 1]
+            data["score"] = 0
+        return data
+
     winner_details = []
     for uid in winners:
         uid_str = str(uid)
@@ -1203,28 +1184,11 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         old_score = data["score"]
         old_tier = data["tier"]
         data["tier"] = validate_tier(data.get("tier"))
-        data["score"] += 2
-
-        if data["score"] >= 5:
-            cur_index = tier_list.index(data["tier"])
-            if cur_index + 1 < len(tier_list):
-                data["tier"] = tier_list[cur_index + 1]
-            data["score"] = 0
-
+        data = adjust_score(data, +2)
         member = guild.get_member(uid)
         data["username"] = member.display_name if member else "Unknown"
         scores[uid_str] = data
-
-        winner_details.append({
-            "uid": uid,
-            "username": data["username"],
-            "team": next((i + 1 for i, team in enumerate(all_teams) if uid in team), None),
-            "old_score": old_score,
-            "new_score": data["score"],
-            "old_tier": old_tier,
-            "new_tier": data["tier"],
-            "delta": +2
-        })
+        winner_details.append({"uid": uid, "username": data["username"], "team": next((i + 1 for i, team in enumerate(all_teams) if uid in team), None), "old_score": old_score, "new_score": data["score"], "old_tier": old_tier, "new_tier": data["tier"], "delta": +2})
 
     loser_details = []
     for uid in losers:
@@ -1233,39 +1197,14 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         old_score = data["score"]
         old_tier = data["tier"]
         data["tier"] = validate_tier(data.get("tier"))
-        data["score"] -= 2
-
-        if data["score"] <= -5:
-            cur_index = tier_list.index(data["tier"])
-            if cur_index - 1 >= 0:
-                data["tier"] = tier_list[cur_index - 1]
-            data["score"] = 0
-
+        data = adjust_score(data, -2)
         member = guild.get_member(uid)
         data["username"] = member.display_name if member else "Unknown"
         scores[uid_str] = data
-
-        loser_details.append({
-            "uid": uid,
-            "username": data["username"],
-            "team": next((i + 1 for i, team in enumerate(all_teams) if uid in team), None),
-            "old_score": old_score,
-            "new_score": data["score"],
-            "old_tier": old_tier,
-            "new_tier": data["tier"],
-            "delta": -2
-        })
+        loser_details.append({"uid": uid, "username": data["username"], "team": next((i + 1 for i, team in enumerate(all_teams) if uid in team), None), "old_score": old_score, "new_score": data["score"], "old_tier": old_tier, "new_tier": data["tier"], "delta": -2})
 
     save_json(SCORE_FILE, scores)
-
-    log_score_transaction(
-        action="set_match_result_fountain",
-        winners=winners,
-        losers=losers,
-        initiator_id=interaction.user.id,
-        timestamp=now.isoformat()
-    )
-
+    log_score_transaction("set_match_result_fountain", winners, losers, interaction.user.id, now.isoformat())
     append_match_log(all_teams, winners, interaction.user.id, mode="fountain")
     update_player_stats(winners, losers)
     save_last_match(winners, losers)
@@ -1335,7 +1274,7 @@ async def undo_last_match(interaction: discord.Interaction):
         data = scores.get(uid_str)
         if data:
             data["score"] -= 1
-            if data["score"] < -5:
+            if data["score"] <= -5:
                 data["tier"] = demote_tier(data["tier"])
                 data["score"] = 0
             scores[uid_str] = data
@@ -1346,7 +1285,7 @@ async def undo_last_match(interaction: discord.Interaction):
         data = scores.get(uid_str)
         if data:
             data["score"] += 1
-            if data["score"] > 5:
+            if data["score"] >= 5:
                 data["tier"] = promote_tier(data["tier"])
                 data["score"] = 0
             scores[uid_str] = data
@@ -1427,7 +1366,7 @@ async def player_stats(interaction: discord.Interaction):
     data = stats.get(uid)
 
     if not data:
-        await interaction.response.send_message("⚠️ Таны статистик бүртгэлгүй байна.", ephemeral=True)
+        await interaction.response.send_message("⚠️ Таны статистик бүртгэлгүй байна.")
         return
 
     wins = data.get("wins", 0)
@@ -1442,9 +1381,46 @@ async def player_stats(interaction: discord.Interaction):
         f"🏆 Ялалт: `{wins}` тоглолт\n"
         f"💀 Ялагдал: `{losses}` тоглолт\n"
         f"📊 Total: `{total}` тоглолт\n"
-        f"🔥 Win rate: `{win_rate:.1f}%`",
-        ephemeral=True
+        f"🔥 Win rate: `{win_rate:.1f}%`"
     )
+
+@bot.tree.command(name="player_stats_users", description="Тоглогчдын win/loss статистик (mention хэлбэрээр)")
+@app_commands.describe(mentions="Тоглогчдыг mention хийнэ (@name @name...)")
+async def player_stats_users(interaction: discord.Interaction, mentions: str):
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.errors.InteractionResponded:
+        return
+
+    user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
+    
+    if not user_ids:
+        await interaction.followup.send("⚠️ Хэрэглэгчийн mention оруулна уу.")
+        return
+
+    stats = load_json(PLAYER_STATS_FILE)
+    lines = []
+
+    for uid in user_ids:
+        data = stats.get(str(uid))
+        member = interaction.guild.get_member(uid)
+        name = member.display_name if member else f"`{uid}`"
+
+        if not data:
+            lines.append(f"❌ {name} статистик бүртгэлгүй байна.")
+            continue
+
+        wins = data.get("wins", 0)
+        losses = data.get("losses", 0)
+        total = wins + losses
+        win_rate = (wins / total) * 100 if total > 0 else 0.0
+
+        lines.append(
+            f"📊 **{name}**\n"
+            f"🏆 Ялалт: `{wins}` | 💀 Ялагдал: `{losses}` | 📊 Total: `{total}` | 🔥 Win rate: `{win_rate:.1f}%`\n"
+        )
+
+    await interaction.followup.send("\n".join(lines))
 
 @bot.tree.command(name="set_tier", description="Админ: тоглогчийн tier болон оноог гар аргаар тохируулна")
 @app_commands.describe(
@@ -1764,6 +1740,46 @@ async def current_match(interaction: discord.Interaction):
         msg_lines.append("")  # newline
 
     await interaction.followup.send("\n".join(msg_lines))
+
+@bot.tree.command(name="leaderboard", description="Топ 10 тоглогчийн оноо, win/loss, winrate харуулна")
+async def leaderboard(interaction: discord.Interaction):
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.errors.InteractionResponded:
+        return
+
+    scores = load_scores()
+    stats = load_json(PLAYER_STATS_FILE)
+
+    if not scores:
+        await interaction.followup.send("📭 Онооны мэдээлэл байхгүй байна.")
+        return
+
+    sorted_data = sorted(scores.items(), key=lambda x: tier_score(x[1]), reverse=True)
+
+    lines = ["🏅 **Leaderboard** — Top 10 (Tier + Score | 🏆/💀 — Winrate%)"]
+    for i, (uid, data) in enumerate(sorted_data[:10], 1):
+        member = interaction.guild.get_member(int(uid))
+        if not member:
+            continue
+
+        username = data.get("username") or member.display_name
+        tier = data.get("tier", "?")
+        score = data.get("score", 0)
+
+        stat = stats.get(uid, {})
+        wins = stat.get("wins", 0)
+        losses = stat.get("losses", 0)
+        total = wins + losses
+        winrate = (wins / total * 100) if total > 0 else 0.0
+
+        # 🏆/💀 хувилбар
+        lines.append(f"{i}. {tier} | {score:+} — {username} 🏆{wins} / 💀{losses} — {winrate:.1f}%")
+
+        # W/L хувилбар бол дараах мөрийг ашигла
+        # lines.append(f"{i}. {tier} | {score:+} — {username} W{wins} / L{losses} — {winrate:.1f}%")
+
+    await interaction.followup.send("\n".join(lines))
 
 @bot.tree.command(name="resync", description="Админ: Slash командуудыг дахин sync хийнэ")
 async def resync(interaction: discord.Interaction):
