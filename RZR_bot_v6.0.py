@@ -1476,24 +1476,21 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
     await interaction.response.send_message(
         f"✅ {user.display_name}-ийн tier **{tier}**, score **{score}** болж шинэчлэгдлээ.", ephemeral=True
     )
-
-@bot.tree.command(name="add_score_test", description="Админ: тоглогчдод оноо нэмэх эсвэл хасах")
+@bot.tree.command(name="add_score_test", description="Тест: оноо нэмэх")
 @app_commands.describe(
-    mentions="Оноо өгөх тоглогчдыг mention хийнэ (@name @name...)",
-    points="Нэмэх эсвэл хасах оноо (default: 1)"
+    mentions="@mention хэлбэрээр заана",
+    points="Нэмэх оноо (default: 1)"
 )
-async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэж чадна.", ephemeral=True)
-        return
-
+async def add_score_test(interaction: discord.Interaction, mentions: str, points: int = 1):
     try:
         await interaction.response.defer(thinking=True)
+        print("✅ interaction.response.defer дууслаа")
     except discord.errors.InteractionResponded:
+        print("❌ Interaction аль хэдийн хариулсан байна.")
         return
 
-    # 👥 Mention-оос ID жагсаалт гаргаж авна
     user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
+    print("👤 Mentions гаргаж авлаа:", user_ids)
 
     if not user_ids:
         await interaction.followup.send("⚠️ Хэрэглэгчийн mention оруулна уу.")
@@ -1503,105 +1500,31 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
     updated = []
 
     for uid in user_ids:
+        print(f"🔍 UID {uid} шалгаж байна")
         member = interaction.guild.get_member(uid)
         if not member:
+            print(f"❌ member fetch null: {uid}")
             continue
 
         uid_str = str(uid)
         data = scores.get(uid_str, get_default_tier())
-
-        old_score = data.get("score", 0)
-        old_tier = data.get("tier", "4-1")
-        tier_list = list(TIER_WEIGHT.keys())
-
-        data["tier"] = old_tier if old_tier in tier_list else "4-1"
         data["score"] += points
-        cur_index = tier_list.index(data["tier"])
-
-        if data["score"] >= 5 and cur_index + 1 < len(tier_list):
-            data["tier"] = tier_list[cur_index + 1]
-            data["score"] = 0
-        elif data["score"] <= -5 and cur_index - 1 >= 0:
-            data["tier"] = tier_list[cur_index - 1]
-            data["score"] = 0
-
         data["username"] = member.display_name
         scores[uid_str] = data
         updated.append(uid)
 
-        # 🧾 Онооны лог бүртгэнэ
-        reason = f"add_score_by_{interaction.user.id}"
-        log_score_transaction(uid_str, points, data["score"], data["tier"], reason=reason)
-
     save_json(SCORE_FILE, scores)
-    await update_nicknames_for_users(interaction.guild, updated)
-
-    mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
-    await interaction.followup.send(f"✅ Оноо {points:+} – {mentions_text}")
-
-
-
-@bot.tree.command(name="add_score", description="Админ: тоглогчдод оноо нэмэх эсвэл хасах")
-@app_commands.describe(
-    mentions="Оноо өгөх тоглогчдыг mention хийнэ (@name @name...)",
-    points="Нэмэх эсвэл хасах оноо (default: 1)"
-)
-async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэж чадна.", ephemeral=True)
-        return
+    print("💾 scores.json хадгаллаа")
 
     try:
-        await interaction.response.defer(thinking=True)
-    except discord.errors.InteractionResponded:
-        return
-
-    # 👥 Mention-оос ID жагсаалт гаргаж авна
-    user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
-
-    if not user_ids:
-        await interaction.followup.send("⚠️ Хэрэглэгчийн mention оруулна уу.")
-        return
-
-    scores = load_scores()
-    updated = []
-
-    for uid in user_ids:
-        member = interaction.guild.get_member(uid)
-        if not member:
-            continue
-
-        uid_str = str(uid)
-        data = scores.get(uid_str, get_default_tier())
-
-        old_score = data.get("score", 0)
-        old_tier = data.get("tier", "4-1")
-        tier_list = list(TIER_WEIGHT.keys())
-
-        data["tier"] = old_tier if old_tier in tier_list else "4-1"
-        data["score"] += points
-        cur_index = tier_list.index(data["tier"])
-
-        if data["score"] >= 5 and cur_index + 1 < len(tier_list):
-            data["tier"] = tier_list[cur_index + 1]
-            data["score"] = 0
-        elif data["score"] <= -5 and cur_index - 1 >= 0:
-            data["tier"] = tier_list[cur_index - 1]
-            data["score"] = 0
-
-        data["username"] = member.display_name
-        scores[uid_str] = data
-        updated.append(uid)
-
-        # 🧾 Онооны лог бүртгэнэ
-        reason = f"add_score_by_{interaction.user.id}"
-        log_score_transaction(uid_str, points, data["score"], data["tier"], reason=reason)
-
-    save_json(SCORE_FILE, scores)
-    await update_nicknames_for_users(interaction.guild, updated)
+        await update_nicknames_for_users(interaction.guild, updated)
+        print("🎭 nickname update дууслаа")
+    except Exception as e:
+        print("⚠️ nickname update-д алдаа:", e)
 
     mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
-    await interaction.followup.send(f"✅ Оноо {points:+} – {mentions_text}")
+    await interaction.followup.send(f"✅ Тест оноо {points:+} – {mentions_text}")
+    print("✅ add_score_test амжилттай дууслаа")
 
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
