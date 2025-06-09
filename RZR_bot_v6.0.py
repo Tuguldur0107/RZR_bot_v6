@@ -41,6 +41,7 @@ SHIELD_FILE = f"{BASE_DIR}/donate_shields.json"
 DONATOR_FILE = f"{BASE_DIR}/donators.json"
 SCORE_LOG_FILE = f"{BASE_DIR}/score_log.jsonl"
 PLAYER_STATS_FILE = f"{BASE_DIR}/player_stats.json"
+SESSION_FILE = f"{BASE_DIR}/session.json"
 
 INFO_DIR = "Info"
 
@@ -54,6 +55,37 @@ GAME_SESSION = {
     "start_time": None,
     "last_win_time": None
 }
+SESSION_FILE = f"{BASE_DIR}/session.json"
+
+def save_session():
+    session_data = {
+        "active": GAME_SESSION["active"],
+        "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
+        "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
+        "initiator_id": TEAM_SETUP.get("initiator_id"),
+        "team_count": TEAM_SETUP.get("team_count"),
+        "players_per_team": TEAM_SETUP.get("players_per_team"),
+        "player_ids": TEAM_SETUP.get("player_ids"),
+        "teams": TEAM_SETUP.get("teams"),
+        "strategy": TEAM_SETUP.get("strategy", "")
+    }
+    save_json(SESSION_FILE, session_data)
+
+def load_session():
+    if not os.path.exists(SESSION_FILE):
+        return
+
+    data = load_json(SESSION_FILE)
+    GAME_SESSION["active"] = data.get("active", False)
+    GAME_SESSION["start_time"] = datetime.fromisoformat(data["start_time"]) if data.get("start_time") else None
+    GAME_SESSION["last_win_time"] = datetime.fromisoformat(data["last_win_time"]) if data.get("last_win_time") else None
+
+    TEAM_SETUP["initiator_id"] = data.get("initiator_id")
+    TEAM_SETUP["team_count"] = data.get("team_count", 2)
+    TEAM_SETUP["players_per_team"] = data.get("players_per_team", 5)
+    TEAM_SETUP["player_ids"] = data.get("player_ids", [])
+    TEAM_SETUP["teams"] = data.get("teams", [])
+    TEAM_SETUP["strategy"] = data.get("strategy", "")
 
 # 🧩 Баг бүрдүүлэлтийн төлөв
 TEAM_SETUP = {
@@ -300,19 +332,6 @@ async def session_timeout_checker():
                 GAME_SESSION["start_time"] = None
                 GAME_SESSION["last_win_time"] = None
                 print("🕛 Session хаагдлаа (24 цаг).")
-                continue
-
-            # ❷ 5 минутын timeout: make_team хийсэн ч баг хуваарилаагүй үед
-            if (
-                TEAM_SETUP and
-                not TEAM_SETUP.get("teams") and
-                (now - GAME_SESSION["start_time"]).total_seconds() > 300
-            ):
-                GAME_SESSION["active"] = False
-                GAME_SESSION["start_time"] = None
-                GAME_SESSION["last_win_time"] = None
-                TEAM_SETUP.clear()
-                print("⏰ Session автоматаар хаагдлаа (5 минут баг хуваарилаагүй).")
 
 TIER_WEIGHT = {
     "4-3": 0,
@@ -609,7 +628,13 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
     except discord.errors.InteractionResponded:
         return
 
-    # 🧠 Session эхлүүлнэ
+    # ✅ Хуучин session байсан бол хаана
+    if GAME_SESSION["active"]:
+        GAME_SESSION["active"] = False
+        GAME_SESSION["start_time"] = None
+        GAME_SESSION["last_win_time"] = None
+
+    # 🧠 Шинэ session эхлүүлнэ
     now = datetime.now(MN_TZ)
     GAME_SESSION["active"] = True
     GAME_SESSION["start_time"] = now
@@ -622,12 +647,18 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
     TEAM_SETUP["teams"] = []
     TEAM_SETUP["initiator_id"] = interaction.user.id
 
-    await interaction.followup.send(f"🟢 {team_count} багтай, {players_per_team} хүнтэй Session эхэллээ. `addme` коммандаар тоглогчид бүртгүүлнэ үү.")
+    await interaction.followup.send(
+        f"🟢 {team_count} багтай, {players_per_team} хүнтэй Session эхэллээ. `addme` коммандаар тоглогчид бүртгүүлнэ үү."
+    )
+    
+    await interaction.followup.send("✅ Match бүртгэгдлээ.")
+    save_session()
+
 
 @bot.tree.command(name="addme", description="Тоглогч өөрийгөө бүртгүүлнэ")
 async def addme(interaction: discord.Interaction):
     try:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer()
     except discord.errors.InteractionResponded:
         return
 
@@ -643,7 +674,26 @@ async def addme(interaction: discord.Interaction):
 
     TEAM_SETUP["player_ids"].append(user_id)
 
-    await interaction.followup.send(f"✅ {interaction.user.mention} бүртгүүллээ.\nНийт бүртгэгдсэн: {len(TEAM_SETUP['player_ids'])}")
+    await interaction.followup.send(
+        f"✅ {interaction.user.mention} бүртгүүллээ.\nНийт бүртгэгдсэн: {len(TEAM_SETUP['player_ids'])}"
+    )
+
+@bot.tree.command(name="show_added_players", description="Бүртгэгдсэн тоглогчдыг харуулна")
+async def show_added_players(interaction: discord.Interaction):
+    try:
+        await interaction.response.defer()
+    except discord.errors.InteractionResponded:
+        return
+
+    if not TEAM_SETUP["player_ids"]:
+        await interaction.followup.send("📭 Одоогоор бүртгэгдсэн тоглогч алга.")
+        return
+
+    guild = interaction.guild
+    mentions = [guild.get_member(uid).mention for uid in TEAM_SETUP["player_ids"] if guild.get_member(uid)]
+    mention_text = "\n".join(mentions)
+
+    await interaction.followup.send(f"📋 Бүртгэгдсэн тоглогчид ({len(mentions)}):\n{mention_text}")
 
 @bot.tree.command(name="remove", description="Тоглогч өөрийгөө бүртгэлээс хасна")
 async def remove(interaction: discord.Interaction):
@@ -772,6 +822,8 @@ async def clear_match(interaction: discord.Interaction):
         await interaction.followup.send(f"⚠️ Дараах тоглогчдын бүртгэл цуцлагдлаа: {', '.join(cleared_users)}")
 
     await interaction.followup.send("🧼 Match-ийн бүртгэл амжилттай цэвэрлэгдлээ.")
+    await interaction.followup.send("✅ Match бүртгэгдлээ.")
+    save_session()
 
 @bot.tree.command(name="go_bot", description="Онооны дагуу тэнцвэртэй баг хуваарилна")
 async def go_bot(interaction: discord.Interaction):
@@ -858,6 +910,9 @@ async def go_bot(interaction: discord.Interaction):
     await interaction.followup.send(
         f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{min(snake_diff, greedy_diff)}`)\n\n" + "".join(lines)
     )
+    await interaction.followup.send("✅ Match бүртгэгдлээ.")
+    save_session()
+
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 async def go_gpt(interaction: discord.Interaction):
@@ -947,6 +1002,8 @@ async def go_gpt(interaction: discord.Interaction):
         lines.append(f"\n⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {mentions}")
 
     await interaction.followup.send("".join(lines))
+    await interaction.followup.send("✅ Match бүртгэгдлээ.")
+    save_session()
 
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -1109,6 +1166,8 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
 
     await interaction.followup.send("\n".join(lines))
+    await interaction.followup.send("✅ Match бүртгэгдлээ.")
+    save_session()
 
     
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
@@ -1261,6 +1320,8 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
 
     await interaction.followup.send("\n".join(lines))
+    await interaction.followup.send("✅ Match бүртгэгдлээ.")
+    save_session()
 
 @bot.tree.command(name="undo_last_match", description="Сүүлд хийсэн match-ийн оноог буцаана")
 async def undo_last_match(interaction: discord.Interaction):
@@ -1333,6 +1394,8 @@ async def undo_last_match(interaction: discord.Interaction):
         f"🏆 Winner-ууд: {win_mentions}\n"
         f"💀 Loser-ууд: {lose_mentions}"
     )
+    await interaction.followup.send("✅ Match бүртгэгдлээ.")
+    save_session()
 
 @bot.tree.command(name="my_score", description="Таны оноо болон tier-г харуулна")
 async def my_score(interaction: discord.Interaction):
@@ -1434,43 +1497,62 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
         f"✅ {user.display_name}-ийн tier **{tier}**, score **{score}** болж шинэчлэгдлээ.", ephemeral=True
     )
 
-@bot.tree.command(name="add_score", description="Админ: тоглогчид оноо нэмэх эсвэл хасах")
+@bot.tree.command(name="add_score", description="Админ: тоглогчдод оноо нэмэх эсвэл хасах")
 @app_commands.describe(
-    user="Хэрэглэгчийг заана (@mention)",
-    points="Нэмэх оноо (эсвэл хасах, default: 1)"
+    mentions="Тоглогчдыг @mention хэлбэрээр оруулна (жишээ: @Naraa @Bataa)",
+    points="Нэмэх эсвэл хасах оноо (default: 1)"
 )
-async def add_score(interaction: discord.Interaction, user: discord.Member, points: int = 1):
+async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэж чадна.", ephemeral=True)
         return
 
+    try:
+        await interaction.response.defer()
+    except discord.errors.InteractionResponded:
+        return
+
+    user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
+    if not user_ids:
+        await interaction.followup.send("⚠️ Ядаж нэг хэрэглэгч mention хийнэ үү.")
+        return
+
     scores = load_scores()
-    uid = str(user.id)
-    data = scores.get(uid, get_default_tier())
+    updated_users = []
 
-    tier_list = list(TIER_WEIGHT.keys())
-    old_score = data.get("score", 0)
-    old_tier = data.get("tier", "4-1")
-    data["tier"] = old_tier if old_tier in tier_list else "4-1"
+    for uid in user_ids:
+        member = interaction.guild.get_member(uid)
+        if not member:
+            continue
 
-    data["score"] += points
-    cur_index = tier_list.index(data["tier"])
+        uid_str = str(uid)
+        data = scores.get(uid_str, get_default_tier())
 
-    if data["score"] >= 5 and cur_index + 1 < len(tier_list):
-        data["tier"] = tier_list[cur_index + 1]
-        data["score"] = 0
-    elif data["score"] <= -5 and cur_index - 1 >= 0:
-        data["tier"] = tier_list[cur_index - 1]
-        data["score"] = 0
+        old_score = data.get("score", 0)
+        old_tier = data.get("tier", "4-1")
+        tier_list = list(TIER_WEIGHT.keys())
 
-    data["username"] = user.display_name
-    scores[uid] = data
+        data["tier"] = old_tier if old_tier in tier_list else "4-1"
+        data["score"] += points
+        cur_index = tier_list.index(data["tier"])
+
+        if data["score"] >= 5 and cur_index + 1 < len(tier_list):
+            data["tier"] = tier_list[cur_index + 1]
+            data["score"] = 0
+        elif data["score"] <= -5 and cur_index - 1 >= 0:
+            data["tier"] = tier_list[cur_index - 1]
+            data["score"] = 0
+
+        data["username"] = member.display_name
+        scores[uid_str] = data
+        updated_users.append(uid)
+
     save_json(SCORE_FILE, scores)
+    await update_nicknames_for_users(interaction.guild, updated_users)
 
-    await update_nicknames_for_users(interaction.guild, [user.id])
-    await interaction.response.send_message(
-        f"✅ {user.display_name}-ийн оноо {points:+} болж, tier: **{data['tier']}**, score: **{data['score']}** боллоо.", ephemeral=True
-    )
+    mentions_text = ", ".join(f"<@{uid}>" for uid in updated_users)
+    await interaction.followup.send(f"✅ Оноо {points:+} – {mentions_text}")
+
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
 @app_commands.describe(
@@ -1689,6 +1771,8 @@ async def on_ready():
     print("🔄 Cleaning and syncing slash commands...")
     await bot.tree.sync()  # Global sync
 
+    load_session()
+
     for guild in bot.guilds:
         await bot.tree.clear_commands(guild=guild)
         await bot.tree.sync(guild=guild)
@@ -1706,6 +1790,8 @@ async def on_message(message):
 
     user_id = str(message.author.id)
     now = datetime.now(timezone.utc).isoformat()
+    
+    
 
     try:
         with open("last_message.json", "r") as f:
