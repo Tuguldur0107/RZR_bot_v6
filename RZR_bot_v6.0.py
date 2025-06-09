@@ -581,6 +581,17 @@ intents = discord.Intents.all()
 
 bot = commands.Bot(command_prefix="/", intents=intents)
 
+def remove_last_match_log():
+    if not os.path.exists(MATCH_LOG_FILE):
+        return
+
+    try:
+        matches = load_json(MATCH_LOG_FILE)
+        if matches:
+            matches.pop()  # хамгийн сүүлийн match-ийг устгана
+            save_json(MATCH_LOG_FILE, matches)
+    except Exception as e:
+        print(f"❌ Match log устгах үед алдаа гарлаа: {e}")
 
 
 
@@ -906,8 +917,11 @@ async def go_gpt(interaction: discord.Interaction):
     await interaction.followup.send("\n".join(lines))
 
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
-@app_commands.describe(winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)")
-async def set_match_result(interaction: discord.Interaction, winner_teams: str):
+@app_commands.describe(
+    winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)",
+    loser_teams="Ялагдсан багуудын дугаарууд (жишээ: 2 4)"
+)
+async def set_match_result(interaction: discord.Interaction, winner_teams: str, loser_teams: str):
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
@@ -925,17 +939,18 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str):
 
     try:
         win_indexes = [int(x.strip()) - 1 for x in winner_teams.strip().split()]
+        lose_indexes = [int(x.strip()) - 1 for x in loser_teams.strip().split()]
     except ValueError:
-        await interaction.followup.send("⚠️ Ялсан багуудын дугаарыг зөв оруулна уу (ж: 1 3)", ephemeral=True)
+        await interaction.followup.send("⚠️ Багийн дугааруудыг зөв оруулна уу (ж: 1 3)", ephemeral=True)
         return
 
     all_teams = TEAM_SETUP["teams"]
-    if any(i < 0 or i >= len(all_teams) for i in win_indexes):
-        await interaction.followup.send("⚠️ Ялсан багийн дугаар буруу байна.", ephemeral=True)
+    if any(i < 0 or i >= len(all_teams) for i in win_indexes + lose_indexes):
+        await interaction.followup.send("⚠️ Багийн дугаар буруу байна.", ephemeral=True)
         return
 
     winners = [uid for i in win_indexes for uid in all_teams[i]]
-    losers = [uid for i, team in enumerate(all_teams) if i not in win_indexes for uid in team]
+    losers = [uid for i in lose_indexes for uid in all_teams[i]]
 
     scores = load_scores()
     now = datetime.now(MN_TZ)
@@ -946,7 +961,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str):
     def validate_tier(tier):
         return tier if tier in tier_list else "4-1"
 
-    winner_details = [] 
+    winner_details = []
     for uid in winners:
         uid_str = str(uid)
         data = scores.get(uid_str, get_default_tier())
@@ -956,11 +971,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str):
         data["score"] += 1
 
         if data["score"] >= 5:
-            try:
-                cur_index = tier_list.index(data["tier"])
-            except ValueError:
-                data["tier"] = "4-1"
-                cur_index = tier_list.index("4-1")
+            cur_index = tier_list.index(data["tier"])
             if cur_index + 1 < len(tier_list):
                 data["tier"] = tier_list[cur_index + 1]
             data["score"] = 0
@@ -990,11 +1001,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str):
         data["score"] -= 1
 
         if data["score"] <= -5:
-            try:
-                cur_index = tier_list.index(data["tier"])
-            except ValueError:
-                data["tier"] = "4-1"
-                cur_index = tier_list.index("4-1")
+            cur_index = tier_list.index(data["tier"])
             if cur_index - 1 >= 0:
                 data["tier"] = tier_list[cur_index - 1]
             data["score"] = 0
@@ -1013,9 +1020,18 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str):
             "new_tier": data["tier"],
             "delta": -1
         })
-    
-    
-    teams = TEAM_SETUP["teams"]  # ← энэ мөрийг заавал нэм
+
+    save_json(SCORE_FILE, scores)
+
+    log_score_transaction(
+        action="set_match_result",
+        winners=winners,
+        losers=losers,
+        initiator_id=interaction.user.id,
+        timestamp=now.isoformat()
+    )
+
+    teams = TEAM_SETUP["teams"]
     append_match_log(teams, winners, interaction.user.id, mode="manual")
     update_player_stats(winners, losers)
 
@@ -1027,18 +1043,48 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str):
         "by": interaction.user.id,
         "by_username": interaction.user.display_name
     }
-    
-    save_last_match(winners, losers)
 
+    save_last_match(winners, losers)
     GAME_SESSION["last_win_time"] = now
 
     uids = [u["uid"] for u in winner_details + loser_details]
     await update_nicknames_for_users(interaction.guild, uids)
-    await interaction.followup.send(f"🏆 {winner_teams}-р баг(ууд) яллаа. Оноо, tier шинэчлэгдлээ.")
 
+    win_str = " ".join(str(i + 1) for i in win_indexes)
+    lose_str = " ".join(str(i + 1) for i in lose_indexes)
+    lines = [f"🏆 {win_str}-р баг(ууд) ялж {lose_str}-р баг ялагдлаа. \\\nОноо, tier шинэчлэгдлээ.\n"]
+
+    if winner_details:
+        lines.append(f"\n\n✅ {win_str}-р багийн **ялагсан суперүүд:**")
+        for p in winner_details:
+            change = ""
+            if p["old_tier"] != p["new_tier"]:
+                if TIER_ORDER.index(p["new_tier"]) < TIER_ORDER.index(p["old_tier"]):
+                    change = " ⬆"
+                else:
+                    change = " ⬇"
+            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+
+    if loser_details:
+        lines.append(f"\n\n💀 {lose_str}-р багийн **ялагдагсан сугууд:**")
+        for p in loser_details:
+            change = ""
+            if p["old_tier"] != p["new_tier"]:
+                if TIER_ORDER.index(p["new_tier"]) < TIER_ORDER.index(p["old_tier"]):
+                    change = " ⬆"
+                else:
+                    change = " ⬇"
+            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+
+    await interaction.followup.send("\n".join(lines))
+
+    
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
-@app_commands.describe(winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)")
-async def set_match_result_fountain(interaction: discord.Interaction, winner_teams: str):
+@app_commands.describe(
+    winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)",
+    loser_teams="Ялагдсан багуудын дугаарууд (жишээ: 2 4)"
+)
+async def set_match_result_fountain(interaction: discord.Interaction, winner_teams: str, loser_teams: str):
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
@@ -1056,17 +1102,18 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
 
     try:
         win_indexes = [int(x.strip()) - 1 for x in winner_teams.strip().split()]
+        lose_indexes = [int(x.strip()) - 1 for x in loser_teams.strip().split()]
     except ValueError:
-        await interaction.followup.send("⚠️ Ялсан багуудын дугаарыг зөв оруулна уу (ж: 1 3)", ephemeral=True)
+        await interaction.followup.send("⚠️ Багийн дугааруудыг зөв оруулна уу (ж: 1 3)", ephemeral=True)
         return
 
     all_teams = TEAM_SETUP["teams"]
-    if any(i < 0 or i >= len(all_teams) for i in win_indexes):
-        await interaction.followup.send("⚠️ Ялсан багийн дугаар буруу байна.", ephemeral=True)
+    if any(i < 0 or i >= len(all_teams) for i in win_indexes + lose_indexes):
+        await interaction.followup.send("⚠️ Багийн дугаар буруу байна.", ephemeral=True)
         return
 
     winners = [uid for i in win_indexes for uid in all_teams[i]]
-    losers = [uid for i, team in enumerate(all_teams) if i not in win_indexes for uid in team]
+    losers = [uid for i in lose_indexes for uid in all_teams[i]]
 
     scores = load_scores()
     now = datetime.now(MN_TZ)
@@ -1087,11 +1134,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         data["score"] += 2
 
         if data["score"] >= 5:
-            try:
-                cur_index = tier_list.index(data["tier"])
-            except ValueError:
-                data["tier"] = "4-1"
-                cur_index = tier_list.index("4-1")
+            cur_index = tier_list.index(data["tier"])
             if cur_index + 1 < len(tier_list):
                 data["tier"] = tier_list[cur_index + 1]
             data["score"] = 0
@@ -1121,11 +1164,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         data["score"] -= 2
 
         if data["score"] <= -5:
-            try:
-                cur_index = tier_list.index(data["tier"])
-            except ValueError:
-                data["tier"] = "4-1"
-                cur_index = tier_list.index("4-1")
+            cur_index = tier_list.index(data["tier"])
             if cur_index - 1 >= 0:
                 data["tier"] = tier_list[cur_index - 1]
             data["score"] = 0
@@ -1145,24 +1184,51 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             "delta": -2
         })
 
-    teams = TEAM_SETUP["teams"]  # ← энэ мөрийг заавал нэм
-    append_match_log(teams, winners, interaction.user.id, mode="manual")
-    update_player_stats(winners, losers)
+    save_json(SCORE_FILE, scores)
 
-    last_match = {
-        "timestamp": now.isoformat(),
-        "winner_team_indexes": win_indexes,
-        "winners": winner_details,
-        "losers": loser_details,
-        "by": interaction.user.id,
-        "by_username": interaction.user.display_name
-    }
+    log_score_transaction(
+        action="set_match_result_fountain",
+        winners=winners,
+        losers=losers,
+        initiator_id=interaction.user.id,
+        timestamp=now.isoformat()
+    )
+
+    append_match_log(all_teams, winners, interaction.user.id, mode="fountain")
+    update_player_stats(winners, losers)
     save_last_match(winners, losers)
-    
     GAME_SESSION["last_win_time"] = now
+
     uids = [u["uid"] for u in winner_details + loser_details]
     await update_nicknames_for_users(interaction.guild, uids)
-    await interaction.followup.send(f"💦 {winner_teams}-р баг(ууд) Fountain ялалт авлаа. Оноо, tier шинэчлэгдлээ.")
+
+    win_str = " ".join(str(i + 1) for i in win_indexes)
+    lose_str = " ".join(str(i + 1) for i in lose_indexes)
+    lines = [f"💦 {win_str}-р баг(ууд) Fountain ялж {lose_str}-р баг ялагдлаа. \\\nОноо, tier шинэчлэгдлээ.\n"]
+
+    if winner_details:
+        lines.append(f"\n\n✅ {win_str}-р багийн **ялагсан суперүүд:**")
+        for p in winner_details:
+            change = ""
+            if p["old_tier"] != p["new_tier"]:
+                if TIER_ORDER.index(p["new_tier"]) < TIER_ORDER.index(p["old_tier"]):
+                    change = " ⬆"
+                else:
+                    change = " ⬇"
+            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+
+    if loser_details:
+        lines.append(f"\n\n💀 {lose_str}-р багийн **ялагдагсан сугууд:**")
+        for p in loser_details:
+            change = ""
+            if p["old_tier"] != p["new_tier"]:
+                if TIER_ORDER.index(p["new_tier"]) < TIER_ORDER.index(p["old_tier"]):
+                    change = " ⬆"
+                else:
+                    change = " ⬇"
+            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+
+    await interaction.followup.send("\n".join(lines))
 
 @bot.tree.command(name="undo_last_match", description="Сүүлд хийсэн match-ийн оноог буцаана")
 async def undo_last_match(interaction: discord.Interaction):
@@ -1172,14 +1238,12 @@ async def undo_last_match(interaction: discord.Interaction):
         print("❌ Interaction already responded.")
         return
 
-    # ✅ Эрх шалгах
     is_admin = interaction.user.guild_permissions.administrator
     is_initiator = interaction.user.id == TEAM_SETUP.get("initiator_id")
     if not (is_admin or is_initiator):
         await interaction.followup.send("⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн ажиллуулж чадна.", ephemeral=True)
         return
 
-    # 📦 last_match.json унших
     if not os.path.exists(LAST_FILE):
         await interaction.followup.send("⚠️ Сүүлд бүртгэсэн match олдсонгүй.", ephemeral=True)
         return
@@ -1214,13 +1278,9 @@ async def undo_last_match(interaction: discord.Interaction):
             scores[uid_str] = data
             changed_ids.append(uid)
 
-    # 🧠 Undo статистик буцаана
     update_player_stats(winners, losers, undo=True)
-
-    # 💾 Оноо хадгалах
     save_json(SCORE_FILE, scores)
 
-    # 📝 Log бичих
     log_score_transaction(
         action="undo",
         winners=winners,
@@ -1229,10 +1289,9 @@ async def undo_last_match(interaction: discord.Interaction):
         timestamp=datetime.now(timezone.utc).isoformat()
     )
 
-    # 🧹 Сүүлчийн match бүртгэл цэвэрлэнэ
     clear_last_match()
+    remove_last_match_log()
 
-        # 📣 Хариу илгээнэ
     win_mentions = " ".join(f"<@{uid}>" for uid in winners)
     lose_mentions = " ".join(f"<@{uid}>" for uid in losers)
     uids = winners + losers
@@ -1569,6 +1628,23 @@ async def whois(interaction: discord.Interaction, mention: str):
 @bot.tree.command(name="debug_id", description="Таны Discord ID-г харуулна")
 async def debug_id(interaction: discord.Interaction):
     await interaction.response.send_message(f"🆔 Таны Discord ID: `{interaction.user.id}`", ephemeral=True)
+
+@bot.tree.command(name="resync", description="Админ: Slash командуудыг дахин sync хийнэ")
+async def resync(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("⛔️ Зөвхөн админ ажиллуулж чадна.", ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True)
+
+    try:
+        synced = 0
+        for guild in bot.guilds:
+            await bot.tree.sync(guild=guild)
+            synced += 1
+        await interaction.followup.send(f"🔄 {synced} сервер дээр slash командууд дахин sync хийгдлээ.")
+    except Exception as e:
+        await interaction.followup.send(f"❌ Sync хийх үед алдаа гарлаа: {e}")
 
 
 print(bot)  # bot объектийг print хий — id нь ямар байна?
