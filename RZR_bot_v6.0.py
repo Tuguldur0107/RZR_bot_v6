@@ -835,10 +835,17 @@ async def go_bot(interaction: discord.Interaction):
         return
 
     scores = load_scores()
-    player_weights = {
+    all_weights = {
         uid: tier_score(scores.get(str(uid), {}))
         for uid in player_ids
     }
+
+    # Оноогоор эрэмбэлж хамгийн сайн total_slots-г сонгоно
+    sorted_players = sorted(all_weights.items(), key=lambda x: x[1], reverse=True)
+    trimmed_players = sorted_players[:total_slots]
+    left_out_players = sorted_players[total_slots:]
+
+    player_weights = dict(trimmed_players)
 
     snake = snake_teams(player_weights, team_count, players_per_team)
     greedy = greedy_teams(player_weights, team_count, players_per_team)
@@ -888,6 +895,10 @@ async def go_bot(interaction: discord.Interaction):
 
         lines.append("\n")
 
+    if left_out_players:
+        left_mentions = "\n• ".join(f"<@{uid}>" for uid, _ in left_out_players)
+        lines.append(f"⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {left_mentions}")
+
     await interaction.followup.send(
         f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{min(snake_diff, greedy_diff)}`)\n\n" + "".join(lines)
     )
@@ -918,20 +929,19 @@ async def go_gpt(interaction: discord.Interaction):
     total_slots = team_count * players_per_team
     scores = load_scores()
 
-    player_scores = []
-    score_map = {}
+    all_scores = []
     for uid in player_ids:
         power = tier_score(scores.get(str(uid), {}))
-        player_scores.append({"id": uid, "power": power})
-        score_map[uid] = power
+        all_scores.append({"id": uid, "power": power})
 
-    if len(player_scores) > total_slots:
-        player_scores.sort(key=lambda x: x["power"], reverse=True)
-        player_scores = player_scores[:total_slots]
-        player_ids = [p["id"] for p in player_scores]
+    sorted_players = sorted(all_scores, key=lambda x: x["power"], reverse=True)
+    selected_players = sorted_players[:total_slots]
+    left_out_players = sorted_players[total_slots:]
+
+    score_map = {p["id"]: p["power"] for p in selected_players}
 
     try:
-        teams = call_gpt_balance_api(team_count, players_per_team, player_scores)
+        teams = call_gpt_balance_api(team_count, players_per_team, selected_players)
     except Exception as e:
         print("❌ GPT API error:", e)
         await interaction.followup.send(
@@ -976,9 +986,8 @@ async def go_gpt(interaction: discord.Interaction):
             else:
                 lines.append(f"{name} ({weight})\n")
 
-    left_out = [uid for uid in TEAM_SETUP["player_ids"] if uid not in used_ids]
-    if left_out:
-        mentions = "\n• ".join(f"<@{uid}>" for uid in left_out)
+    if left_out_players:
+        mentions = "\n• ".join(f"<@{p['id']}>" for p in left_out_players)
         lines.append(f"\n⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {mentions}")
 
     await interaction.followup.send("".join(lines))
