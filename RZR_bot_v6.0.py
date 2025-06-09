@@ -1548,7 +1548,30 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         log_score_transaction(uid_str, points, data["score"], data["tier"], reason=reason)
 
     save_json(SCORE_FILE, scores)
-    await update_nicknames_for_users(interaction.guild, updated)
+
+    # ✅ nickname update дээр try/except хамгаалалт нэмсэн
+    try:
+        for uid in updated:
+            member = interaction.guild.get_member(uid)
+            if not member:
+                continue
+
+            data = scores.get(str(uid), {})
+            tier = data.get("tier", "4-1")
+            base_nick = clean_nickname(member.display_name)
+            emoji = get_donator_emoji(load_donators().get(str(uid), {}))
+            prefix = f"{emoji} {tier}" if emoji else tier
+            new_nick = f"{prefix} | {base_nick}"
+
+            if member.nick != new_nick:
+                try:
+                    await member.edit(nick=new_nick)
+                except discord.Forbidden:
+                    print(f"⛔️ {member} nickname-г өөрчилж чадсангүй. Permission асуудал.")
+                except Exception as e:
+                    print(f"⚠️ {member} nickname-д алдаа гарлаа: {e}")
+    except Exception as e:
+        print("❌ nickname update нийтэд алдаа гарлаа:", e)
 
     msg = []
     if updated:
@@ -1559,7 +1582,6 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         msg.append(f"⚠️ Дараах хэрэглэгчдийг олж чадсангүй: {fail_text}")
 
     await interaction.followup.send("\n".join(msg))
-
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
 @app_commands.describe(
