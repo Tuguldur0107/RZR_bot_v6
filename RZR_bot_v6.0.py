@@ -1483,49 +1483,29 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
     points="Нэмэх эсвэл хасах оноо (default: 1)"
 )
 async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
-    print(f"📥 add_score эхэллээ: from={interaction.user.id} mentions={mentions} points={points}")
-
     if not interaction.user.guild_permissions.administrator:
-        print("⛔️ Админ эрх байхгүй")
         await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэж чадна.", ephemeral=True)
         return
 
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
-        print("❌ Interaction аль хэдийн хариулсан байна.")
         return
 
+    # 👥 Mention-оос ID жагсаалт гаргаж авна
     user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
-    print(f"👤 Mention-с user_ids: {user_ids}")
 
     if not user_ids:
-        print("⚠️ Mention хийгдээгүй байна.")
         await interaction.followup.send("⚠️ Хэрэглэгчийн mention оруулна уу.")
         return
 
     scores = load_scores()
-    print(f"📄 scores.json ачааллаа, нийт={len(scores)}")
-
-    updated_ids = []
-    failed = []
+    updated = []
 
     for uid in user_ids:
-        print(f"🔍 Хэрэглэгч шалгаж байна: {uid}")
         member = interaction.guild.get_member(uid)
-
         if not member:
-            try:
-                member = await asyncio.wait_for(interaction.guild.fetch_member(uid), timeout=2.0)
-                print(f"✅ fetch_member OK: {member.display_name}")
-            except asyncio.TimeoutError:
-                print(f"⏱ {uid} fetch_member timeout боллоо.")
-                failed.append(uid)
-                continue
-            except Exception as e:
-                print(f"❌ {uid} fetch_member алдаа: {e}")
-                failed.append(uid)
-                continue
+            continue
 
         uid_str = str(uid)
         data = scores.get(uid_str, get_default_tier())
@@ -1539,42 +1519,26 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         cur_index = tier_list.index(data["tier"])
 
         if data["score"] >= 5 and cur_index + 1 < len(tier_list):
-            print(f"⬆️ Tier ахив: {data['tier']} → {tier_list[cur_index + 1]}")
             data["tier"] = tier_list[cur_index + 1]
             data["score"] = 0
         elif data["score"] <= -5 and cur_index - 1 >= 0:
-            print(f"⬇️ Tier буурав: {data['tier']} → {tier_list[cur_index - 1]}")
             data["tier"] = tier_list[cur_index - 1]
             data["score"] = 0
 
         data["username"] = member.display_name
         scores[uid_str] = data
-        updated_ids.append(uid)
+        updated.append(uid)
 
+        # 🧾 Онооны лог бүртгэнэ
         reason = f"add_score_by_{interaction.user.id}"
         log_score_transaction(uid_str, points, data["score"], data["tier"], reason=reason)
-        print(f"📦 {uid} оноо шинэчлэгдлээ: score={data['score']}, tier={data['tier']}")
 
     save_json(SCORE_FILE, scores)
-    print("💾 scores.json хадгалагдлаа")
+    await update_nicknames_for_users(interaction.guild, updated)
 
-    try:
-        await update_nicknames_for_users(interaction.guild, updated_ids)
-        print("🎭 nickname update дууслаа")
-    except Exception as e:
-        print(f"⚠️ nickname update-д алдаа гарлаа: {e}")
+    mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
+    await interaction.followup.send(f"✅ Оноо {points:+} – {mentions_text}")
 
-    msg = []
-    if updated_ids:
-        mentions_text = ", ".join(f"<@{uid}>" for uid in updated_ids)
-        msg.append(f"✅ Оноо {points:+} – {mentions_text}")
-    if failed:
-        fail_text = ", ".join(f"<@{uid}>" for uid in failed)
-        msg.append(f"⚠️ Дараах хэрэглэгчдийг олж чадсангүй: {fail_text}")
-
-    print("📨 Бот reply илгээж байна...")
-    await interaction.followup.send("\n".join(msg))
-    print("✅ add_score амжилттай дууслаа")
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
 @app_commands.describe(
