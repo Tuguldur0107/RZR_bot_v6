@@ -1478,28 +1478,33 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
 
 @bot.tree.command(name="add_score", description="Админ: тоглогчдод оноо нэмэх эсвэл хасах")
 @app_commands.describe(
-    users="Оноо өгөх тоглогчид",
+    mentions="Оноо өгөх тоглогчдыг mention хийнэ (@name @name...)",
     points="Нэмэх эсвэл хасах оноо (default: 1)"
 )
-async def add_score(interaction: discord.Interaction, users: commands.Greedy[discord.Member], points: int = 1):
+async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэж чадна.", ephemeral=True)
         return
 
     try:
-        await interaction.response.defer()
+        await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
 
-    if not users:
-        await interaction.followup.send("⚠️ Ядаж нэг хэрэглэгч mention хийнэ үү.")
+    # 👥 Mention-оос ID гаргаж авна
+    user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
+
+    if not user_ids:
+        await interaction.followup.send("⚠️ Хэрэглэгчийн mention оруулна уу.")
         return
 
     scores = load_scores()
-    updated_users = []
+    updated = []
+    for uid in user_ids:
+        member = interaction.guild.get_member(uid)
+        if not member:
+            continue
 
-    for member in users:
-        uid = member.id
         uid_str = str(uid)
         data = scores.get(uid_str, get_default_tier())
 
@@ -1520,12 +1525,12 @@ async def add_score(interaction: discord.Interaction, users: commands.Greedy[dis
 
         data["username"] = member.display_name
         scores[uid_str] = data
-        updated_users.append(uid)
+        updated.append(uid)
 
     save_json(SCORE_FILE, scores)
-    await update_nicknames_for_users(interaction.guild, updated_users)
+    await update_nicknames_for_users(interaction.guild, updated)
 
-    mentions_text = ", ".join(f"<@{uid}>" for uid in updated_users)
+    mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
     await interaction.followup.send(f"✅ Оноо {points:+} – {mentions_text}")
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
