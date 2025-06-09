@@ -1485,6 +1485,7 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
         f"✅ {user.display_name}-ийн tier **{tier}**, score **{score}** болж шинэчлэгдлээ.", ephemeral=True
     )
 
+# ✅ Бүх логик хадгалсан, nickname update төвлөрүүлсэн хувилбар
 @bot.tree.command(name="add_score", description="Админ: тоглогчдод оноо нэмэх эсвэл хасах")
 @app_commands.describe(
     mentions="Оноо өгөх тоглогчдыг mention хийнэ (@name @name...)",
@@ -1507,7 +1508,7 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         return
 
     scores = load_scores()
-    updated = []
+    updated_ids = []
     failed = []
 
     for uid in user_ids:
@@ -1542,46 +1543,24 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
 
         data["username"] = member.display_name
         scores[uid_str] = data
-        updated.append(uid)
+        updated_ids.append(uid)
 
         reason = f"add_score_by_{interaction.user.id}"
         log_score_transaction(uid_str, points, data["score"], data["tier"], reason=reason)
 
     save_json(SCORE_FILE, scores)
-
-    # ✅ nickname update дээр try/except хамгаалалт нэмсэн
-    try:
-        for uid in updated:
-            member = interaction.guild.get_member(uid)
-            if not member:
-                continue
-
-            data = scores.get(str(uid), {})
-            tier = data.get("tier", "4-1")
-            base_nick = clean_nickname(member.display_name)
-            emoji = get_donator_emoji(load_donators().get(str(uid), {}))
-            prefix = f"{emoji} {tier}" if emoji else tier
-            new_nick = f"{prefix} | {base_nick}"
-
-            if member.nick != new_nick:
-                try:
-                    await member.edit(nick=new_nick)
-                except discord.Forbidden:
-                    print(f"⛔️ {member} nickname-г өөрчилж чадсангүй. Permission асуудал.")
-                except Exception as e:
-                    print(f"⚠️ {member} nickname-д алдаа гарлаа: {e}")
-    except Exception as e:
-        print("❌ nickname update нийтэд алдаа гарлаа:", e)
+    await update_nicknames_for_users(interaction.guild, updated_ids)
 
     msg = []
-    if updated:
-        mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
+    if updated_ids:
+        mentions_text = ", ".join(f"<@{uid}>" for uid in updated_ids)
         msg.append(f"✅ Оноо {points:+} – {mentions_text}")
     if failed:
         fail_text = ", ".join(f"<@{uid}>" for uid in failed)
         msg.append(f"⚠️ Дараах хэрэглэгчдийг олж чадсангүй: {fail_text}")
 
     await interaction.followup.send("\n".join(msg))
+
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
 @app_commands.describe(
