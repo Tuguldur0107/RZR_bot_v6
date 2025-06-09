@@ -1747,6 +1747,41 @@ async def resync(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"❌ Sync хийх үед алдаа гарлаа: {e}")
 
+@bot.tree.command(name="current_match", description="Одоогийн идэвхтэй session-д хувиарлагдсан багуудыг харуулна")
+async def current_match(interaction: discord.Interaction):
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.errors.InteractionResponded:
+        return
+
+    if not GAME_SESSION["active"]:
+        await interaction.followup.send("⚠️ Session идэвхгүй байна.")
+        return
+
+    if not TEAM_SETUP.get("teams") or not any(TEAM_SETUP["teams"]):
+        await interaction.followup.send("📭 Багууд хараахан хуваарилагдаагүй байна.")
+        return
+
+    scores = load_scores()
+    guild = interaction.guild
+    msg_lines = []
+
+    for i, team in enumerate(TEAM_SETUP["teams"], start=1):
+        total_score = sum(tier_score(scores.get(str(uid), {})) for uid in team)
+        msg_lines.append(f"**🏅 Team {i}** (нийт оноо: `{total_score}`):")
+
+        for uid in team:
+            data = scores.get(str(uid), {})
+            tier = data.get("tier", "?")
+            score = data.get("score", 0)
+            member = guild.get_member(uid)
+            name = member.display_name if member else f"`{uid}`"
+            msg_lines.append(f"- {name} ({tier} | {score})")
+
+        msg_lines.append("")  # newline
+
+    await interaction.followup.send("\n".join(msg_lines))
+
 
 print(bot)  # bot объектийг print хий — id нь ямар байна?
 # 🎯 1. event-үүд function-ий гадна байж таарна
