@@ -308,13 +308,14 @@ async def github_auto_commit():
             commit_to_github("data/last_match.json", "auto: last_match.json")
             commit_to_github("data/donate_shields.json", "auto: donate_shields.json")
             commit_to_github("data/player_stats.json", "auto: player_stats.json")
+            commit_to_github("data/session.json", "auto: session.json")
+
 
             print("✅ GitHub-д 60 минутаар автоматаар backup хийгдлээ.")
         except Exception as e:
             print("❌ GitHub auto commit алдаа:", e)
 
         await asyncio.sleep(3600)  # 60 минут
-
 
 # ⏱ Session хугацаа дууссан эсэх шалгагч task
 async def session_timeout_checker():
@@ -1510,6 +1511,19 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         uid_str = str(uid)
         data = scores.get(uid_str, get_default_tier())
         data["score"] += points
+
+        # ✅ Tier ахих/буурах логик нэмнэ
+        score = data["score"]
+        tier = data["tier"]
+        while score >= 5:
+            tier = promote_tier(tier)
+            score -= 5
+        while score <= -5:
+            tier = demote_tier(tier)
+            score += 5
+        data["score"] = score
+        data["tier"] = tier
+
         data["username"] = member.display_name
         scores[uid_str] = data
         updated.append(uid)
@@ -1526,7 +1540,6 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
     mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
     await interaction.followup.send(f"✅ Тест оноо {points:+} – {mentions_text}")
     print("✅ add_score амжилттай дууслаа")
-
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
 @app_commands.describe(
@@ -1689,12 +1702,13 @@ async def backup_now(interaction: discord.Interaction):
     try:
         file_list = [
             SCORE_FILE,          # data/scores.json
-            MATCH_LOG_FILE,            # data/match_log.json
+            MATCH_LOG_FILE,      # data/match_log.json
             LAST_FILE,           # data/last_match.json
             SHIELD_FILE,         # data/donate_shields.json
             DONATOR_FILE,        # data/donators.json
             SCORE_LOG_FILE,      # data/score_log.jsonl
             PLAYER_STATS_FILE    # data/player_stats.json
+            SESSION_FILE         # data/session.json
         ]
         commit_to_github_multi(file_list, "🖐 Гар ажиллагаатай GitHub backup")
         await interaction.followup.send("✅ Backup амжилттай хийгдлээ.")
