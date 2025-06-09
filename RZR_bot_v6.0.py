@@ -1485,41 +1485,51 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
         f"✅ {user.display_name}-ийн tier **{tier}**, score **{score}** болж шинэчлэгдлээ.", ephemeral=True
     )
 
-# ✅ Бүх логик хадгалсан, nickname update төвлөрүүлсэн хувилбар
 @bot.tree.command(name="add_score", description="Админ: тоглогчдод оноо нэмэх эсвэл хасах")
 @app_commands.describe(
     mentions="Оноо өгөх тоглогчдыг mention хийнэ (@name @name...)",
     points="Нэмэх эсвэл хасах оноо (default: 1)"
 )
 async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
+    print(f"📥 add_score эхэллээ: from={interaction.user.id} mentions={mentions} points={points}")
+
     if not interaction.user.guild_permissions.administrator:
+        print("⛔️ Админ эрх байхгүй")
         await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэж чадна.", ephemeral=True)
         return
 
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
+        print("❌ Interaction аль хэдийн хариулсан байна.")
         return
 
     user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
+    print(f"👤 Mention-с user_ids: {user_ids}")
 
     if not user_ids:
+        print("⚠️ Mention хийгдээгүй байна.")
         await interaction.followup.send("⚠️ Хэрэглэгчийн mention оруулна уу.")
         return
 
     scores = load_scores()
+    print(f"📄 scores.json ачааллаа, нийт={len(scores)}")
+
     updated_ids = []
     failed = []
 
     for uid in user_ids:
+        print(f"🔍 Хэрэглэгч шалгаж байна: {uid}")
         try:
             member = await interaction.guild.fetch_member(uid)
+            print(f"✅ fetch_member OK: {member.display_name}")
         except Exception as e:
             print(f"❌ {uid} fetch_member алдаа: {e}")
             failed.append(uid)
             continue
 
         if not member:
+            print(f"❌ {uid} member object олдсонгүй.")
             failed.append(uid)
             continue
 
@@ -1535,9 +1545,11 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         cur_index = tier_list.index(data["tier"])
 
         if data["score"] >= 5 and cur_index + 1 < len(tier_list):
+            print(f"⬆️ Tier ахив: {data['tier']} → {tier_list[cur_index + 1]}")
             data["tier"] = tier_list[cur_index + 1]
             data["score"] = 0
         elif data["score"] <= -5 and cur_index - 1 >= 0:
+            print(f"⬇️ Tier буурав: {data['tier']} → {tier_list[cur_index - 1]}")
             data["tier"] = tier_list[cur_index - 1]
             data["score"] = 0
 
@@ -1547,9 +1559,13 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
 
         reason = f"add_score_by_{interaction.user.id}"
         log_score_transaction(uid_str, points, data["score"], data["tier"], reason=reason)
+        print(f"📦 {uid} оноо шинэчлэгдлээ: score={data['score']}, tier={data['tier']}")
 
     save_json(SCORE_FILE, scores)
+    print("💾 scores.json хадгалагдлаа")
+
     await update_nicknames_for_users(interaction.guild, updated_ids)
+    print("🎭 nickname update дууслаа")
 
     msg = []
     if updated_ids:
@@ -1559,7 +1575,9 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         fail_text = ", ".join(f"<@{uid}>" for uid in failed)
         msg.append(f"⚠️ Дараах хэрэглэгчдийг олж чадсангүй: {fail_text}")
 
+    print("📨 Бот reply илгээж байна...")
     await interaction.followup.send("\n".join(msg))
+    print("✅ add_score амжилттай дууслаа")
 
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
