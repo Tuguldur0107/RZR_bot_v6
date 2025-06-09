@@ -1730,23 +1730,6 @@ async def whois(interaction: discord.Interaction, mention: str):
 async def debug_id(interaction: discord.Interaction):
     await interaction.response.send_message(f"🆔 Таны Discord ID: `{interaction.user.id}`", ephemeral=True)
 
-@bot.tree.command(name="resync", description="Админ: Slash командуудыг дахин sync хийнэ")
-async def resync(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("⛔️ Зөвхөн админ ажиллуулж чадна.", ephemeral=True)
-        return
-
-    await interaction.response.defer(thinking=True)
-
-    try:
-        synced = 0
-        for guild in bot.guilds:
-            await bot.tree.sync(guild=guild)
-            synced += 1
-        await interaction.followup.send(f"🔄 {synced} сервер дээр slash командууд дахин sync хийгдлээ.")
-    except Exception as e:
-        await interaction.followup.send(f"❌ Sync хийх үед алдаа гарлаа: {e}")
-
 @bot.tree.command(name="current_match", description="Одоогийн идэвхтэй session-д хувиарлагдсан багуудыг харуулна")
 async def current_match(interaction: discord.Interaction):
     try:
@@ -1781,6 +1764,23 @@ async def current_match(interaction: discord.Interaction):
         msg_lines.append("")  # newline
 
     await interaction.followup.send("\n".join(msg_lines))
+
+@bot.tree.command(name="resync", description="Админ: Slash командуудыг дахин sync хийнэ")
+async def resync(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("⛔️ Зөвхөн админ ажиллуулж чадна.", ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True)
+
+    try:
+        synced = 0
+        for guild in bot.guilds:
+            await bot.tree.sync(guild=guild)
+            synced += 1
+        await interaction.followup.send(f"🔄 {synced} сервер дээр slash командууд дахин sync хийгдлээ.")
+    except Exception as e:
+        await interaction.followup.send(f"❌ Sync хийх үед алдаа гарлаа: {e}")
 
 
 print(bot)  # bot объектийг print хий — id нь ямар байна?
