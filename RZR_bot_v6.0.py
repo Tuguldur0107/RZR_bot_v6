@@ -1707,7 +1707,7 @@ async def backup_now(interaction: discord.Interaction):
             SHIELD_FILE,         # data/donate_shields.json
             DONATOR_FILE,        # data/donators.json
             SCORE_LOG_FILE,      # data/score_log.jsonl
-            PLAYER_STATS_FILE    # data/player_stats.json
+            PLAYER_STATS_FILE,    # data/player_stats.json
             SESSION_FILE         # data/session.json
         ]
         commit_to_github_multi(file_list, "🖐 Гар ажиллагаатай GitHub backup")
