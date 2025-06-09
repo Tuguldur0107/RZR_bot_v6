@@ -1,0 +1,15 @@
+[
+    {
+        "timestamp": "2025-06-09T10:26:14.609577+00:00",
+        "mode": "go_bot",
+        "team_count": 1,
+        "players_per_team": 1,
+        "strategy": "snake",
+        "teams": [
+            [
+                493969204467204099
+            ]
+        ],
+        "initiator": 493969204467204099
+    }
+]
