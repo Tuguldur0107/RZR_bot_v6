@@ -1478,10 +1478,10 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
 
 @bot.tree.command(name="add_score", description="Админ: тоглогчдод оноо нэмэх эсвэл хасах")
 @app_commands.describe(
-    mentions="Тоглогчдыг @mention хэлбэрээр оруулна (жишээ: @Naraa @Bataa)",
+    users="Оноо өгөх тоглогчид",
     points="Нэмэх эсвэл хасах оноо (default: 1)"
 )
-async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
+async def add_score(interaction: discord.Interaction, users: commands.Greedy[discord.Member], points: int = 1):
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэж чадна.", ephemeral=True)
         return
@@ -1491,19 +1491,15 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
     except discord.errors.InteractionResponded:
         return
 
-    user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
-    if not user_ids:
+    if not users:
         await interaction.followup.send("⚠️ Ядаж нэг хэрэглэгч mention хийнэ үү.")
         return
 
     scores = load_scores()
     updated_users = []
 
-    for uid in user_ids:
-        member = interaction.guild.get_member(uid)
-        if not member:
-            continue
-
+    for member in users:
+        uid = member.id
         uid_str = str(uid)
         data = scores.get(uid_str, get_default_tier())
 
