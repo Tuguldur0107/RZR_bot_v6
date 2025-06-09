@@ -1476,81 +1476,13 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
     await interaction.response.send_message(
         f"✅ {user.display_name}-ийн tier **{tier}**, score **{score}** болж шинэчлэгдлээ.", ephemeral=True
     )
-@bot.tree.command(name="add_score", description="Хэрэглэгчдийн оноог нэмэгдүүлнэ")
-@app_commands.describe(
-    mentions="Хэрэглэгчдийг mention хийнэ (@name @name...)",
-    points="Нэмэх оноо (эсвэл хасах, default: 1)"
-)
-async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Энэ командыг зөвхөн админ хэрэглэгч ажиллуулж чадна.", ephemeral=True)
-        return
 
-    try:
-        await interaction.response.defer(thinking=True)
-    except discord.errors.InteractionResponded:
-        print("❌ Interaction аль хэдийн хариулсан байна.")
-        return
-
-    user_ids = [word[2:-1].replace("!", "") for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
-
-    if not user_ids:
-        await interaction.followup.send("⚠️ Хэрэглэгчийн mention оруулна уу.")
-        return
-
-    scores = load_scores()
-    updated = []
-    failed = []
-
-    for uid_str in user_ids:
-        try:
-            member = await interaction.guild.fetch_member(int(uid_str))
-        except Exception as e:
-            print(f"❌ {uid_str} fetch алдаа: {e}")
-            failed.append(uid_str)
-            continue
-
-        data = scores.get(uid_str, get_default_tier())
-        old_score = data.get("score", 0)
-        old_tier = data.get("tier", get_tier())
-        score = old_score + points
-        tier = old_tier
-
-        while score >= 5:
-            tier = promote_tier(tier)
-            score -= 5
-        while score <= -5:
-            tier = demote_tier(tier)
-            score += 5
-
-        scores[uid_str] = {
-            "username": member.name,
-            "score": score,
-            "tier": tier,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }
-
-        log_score_transaction(uid_str, points, score, tier, "manual")
-        save_scores(scores)
-        updated.append(member)
-
-    try:
-        await update_nicknames_for_users(interaction.guild, [m.id for m in updated])
-    except Exception as e:
-        print("⚠️ nickname-д алдаа гарлаа:", e)
-
-    if updated:
-        await interaction.followup.send(f"✅ Оноо {points:+}–оор шинэчлэгдлээ: {', '.join([member.mention for member in updated])}")
-    elif failed:
-        await interaction.followup.send("⚠️ Зарим хэрэглэгчийн мэдээлэл олдсонгүй.")
-
-
-@bot.tree.command(name="add_score_test", description="Тест: оноо нэмэх")
+@bot.tree.command(name="add_score", description="Тест: оноо нэмэх")
 @app_commands.describe(
     mentions="@mention хэлбэрээр заана",
     points="Нэмэх оноо (default: 1)"
 )
-async def add_score_test(interaction: discord.Interaction, mentions: str, points: int = 1):
+async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
     try:
         await interaction.response.defer(thinking=True)
         print("✅ interaction.response.defer дууслаа")
@@ -1593,7 +1525,7 @@ async def add_score_test(interaction: discord.Interaction, mentions: str, points
 
     mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
     await interaction.followup.send(f"✅ Тест оноо {points:+} – {mentions_text}")
-    print("✅ add_score_test амжилттай дууслаа")
+    print("✅ add_score амжилттай дууслаа")
 
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
