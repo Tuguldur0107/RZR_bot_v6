@@ -55,7 +55,17 @@ GAME_SESSION = {
     "start_time": None,
     "last_win_time": None
 }
+# 🧩 Баг бүрдүүлэлтийн төлөв
+TEAM_SETUP = {
+    "initiator_id": None,
+    "team_count": 2,
+    "players_per_team": 5,
+    "player_ids": [],
+    "teams": [],
+    "strategy": ""
+}
 SESSION_FILE = f"{BASE_DIR}/session.json"
+
 
 def save_session():
     session_data = {
@@ -87,14 +97,6 @@ def load_session():
     TEAM_SETUP["teams"] = data.get("teams", [])
     TEAM_SETUP["strategy"] = data.get("strategy", "")
 
-# 🧩 Баг бүрдүүлэлтийн төлөв
-TEAM_SETUP = {
-    "initiator_id": None,
-    "player_ids": [],
-    "team_count": 2,
-    "players_per_team": 5,
-    "teams": []
-}
 
 # 1. Flask server thread-ээр ажиллуулна
 def keep_alive():
@@ -744,23 +746,6 @@ async def remove_user(interaction: discord.Interaction, mention: str):
         await interaction.followup.send("ℹ️ Бүртгэлээс хасагдсан тоглогч олдсонгүй.")
     else:
         await interaction.followup.send(f"🗑 {removed} тоглогч бүртгэлээс хасагдлаа.")
-
-@bot.tree.command(name="show_added_players", description="Бүртгэгдсэн тоглогчдыг харуулна")
-async def show_added_players(interaction: discord.Interaction):
-    try:
-        await interaction.response.defer(ephemeral=True)
-    except discord.errors.InteractionResponded:
-        return
-
-    if not TEAM_SETUP["player_ids"]:
-        await interaction.followup.send("📭 Одоогоор бүртгэгдсэн тоглогч алга.")
-        return
-
-    guild = interaction.guild
-    mentions = [guild.get_member(uid).mention for uid in TEAM_SETUP["player_ids"] if guild.get_member(uid)]
-    mention_text = "\n".join(mentions)
-
-    await interaction.followup.send(f"📋 Бүртгэгдсэн тоглогчид ({len(mentions)}):\n{mention_text}")
 
 @bot.tree.command(name="set_match", description="Админ: гараар баг бүрдүүлнэ")
 @app_commands.describe(team_number="Багийн дугаар", mentions="Тоглогчдыг mention хийнэ")
