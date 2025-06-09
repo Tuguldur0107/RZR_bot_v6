@@ -531,6 +531,7 @@ async def update_nicknames_for_users(guild, user_ids: list):
         emoji = get_donator_emoji(donor_data)
 
         base_nick = clean_nickname(member.display_name)
+        prefix = f"{emoji} {tier}" if emoji else tier
         new_nick = f"{prefix} | {base_nick}"
 
         if member.nick == new_nick:
