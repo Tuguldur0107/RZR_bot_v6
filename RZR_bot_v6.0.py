@@ -1500,7 +1500,6 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
     except discord.errors.InteractionResponded:
         return
 
-    # 👥 Mention-оос ID гаргаж авна
     user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
 
     if not user_ids:
@@ -1509,9 +1508,18 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
 
     scores = load_scores()
     updated = []
+    failed = []
+
     for uid in user_ids:
-        member = interaction.guild.get_member(uid)
+        try:
+            member = await interaction.guild.fetch_member(uid)
+        except Exception as e:
+            print(f"❌ {uid} fetch_member алдаа: {e}")
+            failed.append(uid)
+            continue
+
         if not member:
+            failed.append(uid)
             continue
 
         uid_str = str(uid)
@@ -1536,15 +1544,21 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         scores[uid_str] = data
         updated.append(uid)
 
-        # 🧾 Онооны лог бүртгэнэ
         reason = f"add_score_by_{interaction.user.id}"
         log_score_transaction(uid_str, points, data["score"], data["tier"], reason=reason)
 
     save_json(SCORE_FILE, scores)
     await update_nicknames_for_users(interaction.guild, updated)
 
-    mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
-    await interaction.followup.send(f"✅ Оноо {points:+} – {mentions_text}")
+    msg = []
+    if updated:
+        mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
+        msg.append(f"✅ Оноо {points:+} – {mentions_text}")
+    if failed:
+        fail_text = ", ".join(f"<@{uid}>" for uid in failed)
+        msg.append(f"⚠️ Дараах хэрэглэгчдийг олж чадсангүй: {fail_text}")
+
+    await interaction.followup.send("\n".join(msg))
 
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
