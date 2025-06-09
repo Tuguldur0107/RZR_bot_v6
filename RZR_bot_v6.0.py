@@ -774,24 +774,24 @@ async def clear_match(interaction: discord.Interaction):
     await interaction.followup.send("🧼 Match-ийн бүртгэл амжилттай цэвэрлэгдлээ.")
 
 @bot.tree.command(name="go_bot", description="Онооны дагуу тэнцвэртэй баг хуваарилна")
-async def go_bot(interaction: discord.Interaction, team_count: int, players_per_team: int):
+async def go_bot(interaction: discord.Interaction):
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
 
-    # ✅ Зөвхөн initiator эсвэл админ ажиллуулна
     is_admin = interaction.user.guild_permissions.administrator
     is_initiator = interaction.user.id == TEAM_SETUP.get("initiator_id")
     if not (is_admin or is_initiator):
         await interaction.followup.send("⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн ажиллуулж чадна.", ephemeral=True)
         return
 
-    # ✅ Session шалгана
     if not GAME_SESSION["active"]:
-        await interaction.followup.send("⚠️ Session идэвхгүй байна.")
+        await interaction.followup.send("⚠️ Session идэвхгүй байна.", ephemeral=True)
         return
 
+    team_count = TEAM_SETUP.get("team_count")
+    players_per_team = TEAM_SETUP.get("players_per_team")
     player_ids = TEAM_SETUP.get("player_ids", [])
     total_slots = team_count * players_per_team
 
@@ -802,13 +802,11 @@ async def go_bot(interaction: discord.Interaction, team_count: int, players_per_
         return
 
     scores = load_scores()
-    player_weights = {}
+    player_weights = {
+        uid: tier_score(scores.get(str(uid), {}))
+        for uid in player_ids
+    }
 
-    for uid in player_ids:
-        data = scores.get(str(uid), {})
-        player_weights[uid] = tier_score(data)
-
-    # 🧠 Хоёр хувилбараар баг хуваана
     snake = snake_teams(player_weights, team_count, players_per_team)
     greedy = greedy_teams(player_weights, team_count, players_per_team)
 
@@ -822,14 +820,10 @@ async def go_bot(interaction: discord.Interaction, team_count: int, players_per_
         best_teams = snake
         strategy = "snake"
 
-    # ✅ Баг, тохиргоо, session хадгална
     TEAM_SETUP["teams"] = best_teams
-    TEAM_SETUP["team_count"] = team_count
-    TEAM_SETUP["players_per_team"] = players_per_team
     TEAM_SETUP["strategy"] = strategy
     GAME_SESSION["last_win_time"] = datetime.now(timezone.utc)
 
-    # 📝 Match log бүртгэнэ
     match_data = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "mode": "go_bot",
@@ -841,15 +835,28 @@ async def go_bot(interaction: discord.Interaction, team_count: int, players_per_
     }
     append_to_json_list(MATCH_LOG_FILE, match_data)
 
-    # 📣 Багийн бүрэлдэхүүн харуулна
     guild = interaction.guild
     lines = []
     for i, team in enumerate(best_teams, start=1):
-        names = [guild.get_member(uid).display_name for uid in team if guild.get_member(uid)]
-        lines.append(f"**#{i}-р баг**: " + ", ".join(names))
+        team_total = sum(player_weights.get(uid, 0) for uid in team)
+        leader_uid = max(team, key=lambda uid: player_weights.get(uid, 0))
+        leader_name = guild.get_member(leader_uid).display_name if guild.get_member(leader_uid) else str(leader_uid)
+
+        lines.append(f"# {i}-р баг (нийт оноо: {team_total})\n")
+
+        for uid in team:
+            member = guild.get_member(uid)
+            name = member.display_name if member else f"{uid}"
+            weight = player_weights.get(uid, 0)
+            if uid == leader_uid:
+                lines.append(f"{name} ({weight}) 😎 Team Leader\n")
+            else:
+                lines.append(f"{name} ({weight})\n")
+
+        lines.append("\n")
 
     await interaction.followup.send(
-        f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{min(snake_diff, greedy_diff)}`)\n\n" + "\n".join(lines)
+        f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{min(snake_diff, greedy_diff)}`)\n\n" + "".join(lines)
     )
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
@@ -866,18 +873,22 @@ async def go_gpt(interaction: discord.Interaction):
     except discord.errors.InteractionResponded:
         return
 
+    if not GAME_SESSION["active"]:
+        await interaction.followup.send("⚠️ Session идэвхгүй байна.", ephemeral=True)
+        return
+
     team_count = TEAM_SETUP["team_count"]
     players_per_team = TEAM_SETUP["players_per_team"]
     player_ids = TEAM_SETUP["player_ids"]
+    total_slots = team_count * players_per_team
     scores = load_scores()
 
-    total_slots = team_count * players_per_team
     player_scores = []
-
+    score_map = {}
     for uid in player_ids:
-        data = scores.get(str(uid), {})
-        power = tier_score(data)
+        power = tier_score(scores.get(str(uid), {}))
         player_scores.append({"id": uid, "power": power})
+        score_map[uid] = power
 
     if len(player_scores) > total_slots:
         player_scores.sort(key=lambda x: x["power"], reverse=True)
@@ -885,7 +896,7 @@ async def go_gpt(interaction: discord.Interaction):
         player_ids = [p["id"] for p in player_scores]
 
     try:
-        teams = call_gpt_balance_api(team_count, players_per_team, player_ids, scores)
+        teams = call_gpt_balance_api(team_count, players_per_team, player_scores)
     except Exception as e:
         print("❌ GPT API error:", e)
         await interaction.followup.send(
@@ -895,26 +906,47 @@ async def go_gpt(interaction: discord.Interaction):
         return
 
     TEAM_SETUP["teams"] = teams
+    TEAM_SETUP["strategy"] = "gpt"
     GAME_SESSION["last_win_time"] = datetime.now(timezone.utc)
 
-    used_ids = set(uid for team in teams for uid in team)
+    match_data = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mode": "go_gpt",
+        "team_count": team_count,
+        "players_per_team": players_per_team,
+        "strategy": "gpt",
+        "teams": teams,
+        "initiator": interaction.user.id
+    }
+    append_to_json_list(MATCH_LOG_FILE, match_data)
+
+    guild = interaction.guild
     team_emojis = ["🥇", "🥈", "🥉", "🎯", "🔥", "🚀", "🎮", "🛡️", "⚔️", "🧠"]
+    used_ids = set(uid for team in teams for uid in team)
 
     lines = ["🤖 **ChatGPT-ээр тэнцвэржүүлсэн багууд:**"]
     for i, team in enumerate(teams):
         emoji = team_emojis[i % len(team_emojis)]
-        total = sum(tier_score(scores.get(str(uid), {})) for uid in team)
-        lines.append(f"\n{emoji} **Team {i + 1}** (нийт оноо: `{total}` 🧮):")
+        team_total = sum(score_map.get(uid, 0) for uid in team)
+        leader_uid = max(team, key=lambda uid: score_map.get(uid, 0))
+        leader_name = guild.get_member(leader_uid).display_name if guild.get_member(leader_uid) else str(leader_uid)
+
+        lines.append(f"\n{emoji} **#{i+1}-р баг** (нийт оноо: {team_total}) 😎\n")
         for uid in team:
-            score = tier_score(scores.get(str(uid), {}))
-            lines.append(f"- <@{uid}> (оноо: {score})")
+            member = guild.get_member(uid)
+            name = member.display_name if member else f"{uid}"
+            weight = score_map.get(uid, 0)
+            if uid == leader_uid:
+                lines.append(f"{name} ({weight}) 😎 Team Leader\n")
+            else:
+                lines.append(f"{name} ({weight})\n")
 
     left_out = [uid for uid in TEAM_SETUP["player_ids"] if uid not in used_ids]
     if left_out:
         mentions = "\n• ".join(f"<@{uid}>" for uid in left_out)
         lines.append(f"\n⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {mentions}")
 
-    await interaction.followup.send("\n".join(lines))
+    await interaction.followup.send("".join(lines))
 
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -1655,16 +1687,12 @@ async def on_ready():
     print(f"🤖 RZR Bot ажиллаж байна: {bot.user}")
     print("📁 Working directory:", os.getcwd())
 
-    # try:
-    #     copy_scores_from_github()
-    # except Exception as e:
-    #     print(f"❌ copy_scores_from_github алдаа: {e}")
-    # try:
-    #     copy_donators_from_github()
-    # except Exception as e:
-    #     print(f"❌ copy_donators_from_github алдаа: {e}")
+    print("🔄 Cleaning and syncing slash commands...")
+    await bot.tree.sync()  # Global sync
 
     for guild in bot.guilds:
+        await bot.tree.clear_commands(guild=guild)
+        await bot.tree.sync(guild=guild)
         bot.tree.copy_global_to(guild=guild)
         await bot.tree.sync(guild=guild)
         print(f"✅ Slash commands synced: {guild.name} ({guild.id})")
@@ -1690,16 +1718,6 @@ async def on_message(message):
 
     with open("last_message.json", "w") as f:
         json.dump(last_seen, f, indent=4)
-    
-    # try:
-    #     copy_scores_from_github()
-    # except Exception as e:
-    #     print(f"❌ copy_scores_from_github алдаа: {e}")
-
-    # try:
-    #     copy_donators_from_github()
-    # except Exception as e:
-    #     print(f"❌ copy_donators_from_github алдаа: {e}")
 
     await bot.process_commands(message)
     
