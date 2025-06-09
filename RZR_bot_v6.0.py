@@ -614,9 +614,6 @@ def remove_last_match_log():
     except Exception as e:
         print(f"❌ Match log устгах үед алдаа гарлаа: {e}")
 
-
-
-
 @bot.tree.command(name="ping", description="Ботын latency-г шалгана")
 async def ping(interaction: discord.Interaction):
     latency_ms = round(bot.latency * 1000)
@@ -655,7 +652,6 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
     
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
     save_session()
-
 
 @bot.tree.command(name="addme", description="Тоглогч өөрийгөө бүртгүүлнэ")
 async def addme(interaction: discord.Interaction):
@@ -897,7 +893,6 @@ async def go_bot(interaction: discord.Interaction):
     )
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
     save_session()
-
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 async def go_gpt(interaction: discord.Interaction):
@@ -1153,7 +1148,6 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     await interaction.followup.send("\n".join(lines))
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
     save_session()
-
     
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -1537,7 +1531,6 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
 
     mentions_text = ", ".join(f"<@{uid}>" for uid in updated_users)
     await interaction.followup.send(f"✅ Оноо {points:+} – {mentions_text}")
-
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
 @app_commands.describe(
