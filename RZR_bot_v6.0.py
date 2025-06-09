@@ -1352,7 +1352,6 @@ async def my_score(interaction: discord.Interaction):
         f"🏅 {username}:\n"
         f"Tier: **{tier}**\n"
         f"Score: **{score}**",
-        ephemeral=True
     )
 
 @bot.tree.command(name="user_score", description="Бусад тоглогчийн оноо болон tier-г харуулна")
