@@ -518,36 +518,32 @@ async def update_nicknames_for_users(guild, user_ids: list):
     for user_id in user_ids:
         member = guild.get_member(int(user_id))
         if not member:
+            print(f"⚠️ Member {user_id} get_member олдсонгүй.")
             continue
 
         score_data = scores.get(str(user_id))
         if not score_data:
+            print(f"⚠️ Member {user_id} score_data олдсонгүй.")
             continue
 
         tier = score_data.get("tier", "4-1")
         donor_data = donors.get(str(user_id), {})
         emoji = get_donator_emoji(donor_data)
 
-        # ✅ nickname-ыг цэвэрлэнэ
         base_nick = clean_nickname(member.display_name)
-
-        # ✅ Prefix-г бүрдүүлнэ
-        if emoji:
-            prefix = f"{emoji} {tier}"
-        else:
-            prefix = tier
-
         new_nick = f"{prefix} | {base_nick}"
 
         if member.nick == new_nick:
+            print(f"ℹ️ {member.display_name} nickname аль хэдийн тохирсон.")
             continue
 
         try:
             await member.edit(nick=new_nick)
+            print(f"✅ {member.display_name} nickname шинэчлэгдлээ → {new_nick}")
         except discord.Forbidden:
-            print(f"⛔️ {member} nickname-г өөрчилж чадсангүй.")
+            print(f"⛔️ {member.display_name} nickname-г өөрчилж чадсангүй. Permission асуудал байж магадгүй.")
         except Exception as e:
-            print(f"⚠️ {member} nickname-д алдаа гарлаа: {e}")
+            print(f"⚠️ {member.display_name} nickname-д алдаа гарлаа: {e}")
 
 def call_gpt_balance_api(team_count, players_per_team, player_ids, scores):
     if not OPENAI_API_KEY:
