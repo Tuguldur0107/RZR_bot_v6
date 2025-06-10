@@ -1469,6 +1469,10 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
     points="Нэмэх оноо (default: 1)"
 )
 async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэнэ.", ephemeral=True)
+        return
+
     try:
         await interaction.response.defer(thinking=True)
         print("✅ interaction.response.defer дууслаа")
