@@ -381,7 +381,16 @@ def greedy_teams(player_weights, team_count, players_per_team):
     team_totals = [0] * team_count
 
     for uid, weight in sorted_players:
-        min_team_index = team_totals.index(min(team_totals))
+        # ✅ хүн бүр багтаа дээд тал нь players_per_team хүргэж авна
+        valid_indexes = [
+            i for i in range(team_count)
+            if len(teams[i]) < players_per_team
+        ]
+
+        if not valid_indexes:
+            break  # бүх баг дүүрсэн бол зогсоно
+
+        min_team_index = min(valid_indexes, key=lambda i: team_totals[i])
         teams[min_team_index].append(uid)
         team_totals[min_team_index] += weight
 
