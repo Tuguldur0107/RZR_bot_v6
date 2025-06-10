@@ -851,7 +851,6 @@ async def go_bot(interaction: discord.Interaction):
         for uid in player_ids
     }
 
-    # Оноогоор эрэмбэлнэ
     sorted_players = sorted(weights_all.items(), key=lambda x: x[1], reverse=True)
     trimmed_players = sorted_players[:total_slots]
     player_weights = dict(trimmed_players)
@@ -908,9 +907,17 @@ async def go_bot(interaction: discord.Interaction):
         mentions = "\n• ".join(f"<@{uid}>" for uid, _ in left_out_players)
         lines.append(f"⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {mentions}")
 
-    await interaction.followup.send(
-        f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{min(snake_diff, greedy_diff)}`)\n\n" + "".join(lines)
+    is_ranked = TEAM_SETUP.get("players_per_team") in [4, 5] and TEAM_SETUP.get("team_count", 0) >= 2
+    ranked_text = (
+        "🏅 Энэ match: **Ranked** ✅ (оноо тооцно)"
+        if is_ranked else
+        "⚠️ Энэ match: **Ranked биш** ❌ (оноо тооцохгүй)"
     )
+
+    lines.append(f"\n{ranked_text}")
+    lines.insert(0, f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{min(snake_diff, greedy_diff)}`)\n")
+
+    await interaction.followup.send("".join(lines))
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
@@ -1012,6 +1019,10 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
+    if not (TEAM_SETUP.get("players_per_team") in [4, 5] and TEAM_SETUP.get("team_count", 0) >= 2):
+        await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
+        return
+
 
     is_admin = interaction.user.guild_permissions.administrator
     is_initiator = interaction.user.id == TEAM_SETUP.get("initiator_id")
@@ -1102,7 +1113,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     lines = [f"🏆 {win_str}-р баг(ууд) ялж {lose_str}-р баг ялагдлаа. \\\nОноо, tier шинэчлэгдлээ.\n"]
 
     if winner_details:
-        lines.append(f"\n\n✅ {win_str}-р багийн **ялагсан суперүүд:**")
+        lines.append(f"\n\n✅ {win_str}-р багийн **ялсан суперүүд:**")
         for p in winner_details:
             change = ""
             if p["old_tier"] != p["new_tier"]:
@@ -1113,7 +1124,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
 
     if loser_details:
-        lines.append(f"\n\n💀 {lose_str}-р багийн **ялагдагсан сугууд:**")
+        lines.append(f"\n\n💀 {lose_str}-р багийн **ялагдсан сугууд:**")
         for p in loser_details:
             change = ""
             if p["old_tier"] != p["new_tier"]:
@@ -1136,6 +1147,9 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
+        return
+    if not (TEAM_SETUP.get("players_per_team") in [4, 5] and TEAM_SETUP.get("team_count", 0) >= 2):
+        await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
         return
 
     is_admin = interaction.user.guild_permissions.administrator
@@ -1675,7 +1689,7 @@ async def match_history(interaction: discord.Interaction):
         blocks.append("\n".join(lines))
 
     msg = "\n\n".join(blocks)
-    await interaction.response.send_message(f"📜 **Сүүлийн 5 Match:**\n{msg}", ephemeral=True)
+    await interaction.response.send_message(f"📜 **Сүүлийн 5 Match:**\n{msg}")
 
 @bot.tree.command(name="backup_now", description="Админ: GitHub руу гараар backup хийнэ")
 async def backup_now(interaction: discord.Interaction):
