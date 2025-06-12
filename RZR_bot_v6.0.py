@@ -1825,6 +1825,19 @@ async def resync(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"❌ Sync хийх үед алдаа гарлаа: {e}")
 
+# тест комманд
+@bot.tree.command(name="sql_test_score", description="SQL-с оноо шалгана")
+async def sql_test_score(interaction: discord.Interaction):
+    uid = interaction.user.id
+    data = await get_score(uid)
+
+    if not data:
+        await interaction.response.send_message("📭 SQL-с оноо олдсонгүй.", ephemeral=True)
+    else:
+        await interaction.response.send_message(
+            f"👤 {interaction.user.display_name}: {data['score']} оноо, Tier: {data['tier']}", ephemeral=True
+        )
+
 
 print(bot)  # bot объектийг print хий — id нь ямар байна?
 # 🎯 1. event-үүд function-ий гадна байж таарна
