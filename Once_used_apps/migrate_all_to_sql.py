@@ -59,6 +59,22 @@ def migrate_player_stats(cur):
         """, (int(uid), d.get("wins", 0), d.get("losses", 0)))
     print("✅ player_stats.json → player_stats")
 
+def migrate_matches(cur):
+    data = load_json("./data/match_log.json")
+    for m in data:
+        cur.execute("""
+            INSERT INTO matches (
+                timestamp, mode, initiator_id, team_count,
+                players_per_team, strategy, teams
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            m.get("timestamp"), m.get("mode"), m.get("initiator", None),
+            m.get("team_count", 2), m.get("players_per_team", 5),
+            m.get("strategy", ""), json.dumps(m.get("teams", []))
+        ))
+    print(f"✅ match_log.json → matches ({len(data)} rows)")
+
+
 def migrate_session(cur):
     data = load_json("./data/session.json")
     cur.execute("DELETE FROM session_state;")
@@ -81,7 +97,7 @@ import json, psycopg2
 
 DATABASE_URL = "postgresql://postgres:imTvuBaFtWGKRyswpGAKVYZEgHzJnliV@switchback.proxy.rlwy.net:35783/railway"
 
-def migrate_converted_score_log():
+def migrate_converted_score_log(cur):
     with open("./data/score_log_converted.json", "r", encoding="utf-8") as f:
         logs = json.load(f)
 
@@ -110,25 +126,6 @@ def migrate_converted_score_log():
     conn.close()
     print(f"✅ {inserted} мөр score_log table-д орлоо")
 
-if __name__ == "__main__":
-    migrate_converted_score_log()
-
-
-
-def migrate_matches(cur):
-    data = load_json("./data/match_log.json")
-    for m in data:
-        cur.execute("""
-            INSERT INTO matches (
-                timestamp, mode, initiator_id, team_count,
-                players_per_team, strategy, teams
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (
-            m.get("timestamp"), m.get("mode"), m.get("initiator", None),
-            m.get("team_count", 2), m.get("players_per_team", 5),
-            m.get("strategy", ""), json.dumps(m.get("teams", []))
-        ))
-    print(f"✅ match_log.json → matches ({len(data)} rows)")
 
 def run_all():
     conn = psycopg2.connect(DATABASE_URL)
@@ -138,7 +135,7 @@ def run_all():
     migrate_last_match(cur)
     migrate_player_stats(cur)
     migrate_session(cur)
-    migrate_score_log(cur)
+    migrate_converted_score_log()
     migrate_matches(cur)
     conn.commit()
     cur.close()

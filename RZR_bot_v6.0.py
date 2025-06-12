@@ -12,7 +12,7 @@ import requests
 from keep_alive import keep_alive
 from dotenv import load_dotenv
 import base64
-from github_commit import commit_to_github
+from Once_used_apps.github_commit import commit_to_github
 from database import get_score, upsert_score
 
 
@@ -301,7 +301,7 @@ async def github_auto_commit():
     await asyncio.sleep(3600)
     while not bot.is_closed():
         try:
-            from github_commit import commit_to_github
+            from Once_used_apps.github_commit import commit_to_github
 
             commit_to_github("data/scores.json", "auto: scores.json")
             commit_to_github("data/donators.json", "auto: donators.json")
