@@ -13,6 +13,8 @@ from keep_alive import keep_alive
 from dotenv import load_dotenv
 import base64
 from github_commit import commit_to_github
+from database import get_score, upsert_score
+
 
 load_dotenv()
 print("🧪 ENV LOADED", os.getenv("GUILD_ID")) 
