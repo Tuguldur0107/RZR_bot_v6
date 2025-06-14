@@ -171,26 +171,25 @@ async def get_player_stats(uid_list: list[int]):
     return rows
 
 # 🧩 Tier system functions (async биш)
+# 🧱 Tier config
+TIER_ORDER = [
+    "1-1", "1-2", "1-3", "1-4", "1-5",
+    "2-1", "2-2", "2-3", "2-4", "2-5",
+    "3-1", "3-2", "3-3", "3-4", "3-5",
+    "4-1", "4-2", "4-3", "4-4", "4-5",
+    "5-1", "5-2", "5-3", "5-4", "5-5"
+]
 
+# 🎯 Default tier
 def get_default_tier():
     return {"score": 0, "tier": "4-1"}
 
+# ⬆️ Tier ахиулах
 def promote_tier(tier: str) -> str:
-    order = [
-        "1-1", "1-2", "1-3",
-        "2-1", "2-2", "2-3",
-        "3-1", "3-2", "3-3",
-        "4-1", "4-2", "4-3"
-    ]
-    idx = order.index(tier) if tier in order else order.index("4-1")
-    return order[min(idx + 1, len(order) - 1)]
+    idx = TIER_ORDER.index(tier) if tier in TIER_ORDER else TIER_ORDER.index("4-1")
+    return TIER_ORDER[min(idx + 1, len(TIER_ORDER) - 1)]
 
+# ⬇️ Tier бууруулах
 def demote_tier(tier: str) -> str:
-    order = [
-        "1-1", "1-2", "1-3",
-        "2-1", "2-2", "2-3",
-        "3-1", "3-2", "3-3",
-        "4-1", "4-2", "4-3"
-    ]
-    idx = order.index(tier) if tier in order else order.index("4-1")
-    return order[max(idx - 1, 0)]
+    idx = TIER_ORDER.index(tier) if tier in TIER_ORDER else TIER_ORDER.index("4-1")
+    return TIER_ORDER[max(idx - 1, 0)]
