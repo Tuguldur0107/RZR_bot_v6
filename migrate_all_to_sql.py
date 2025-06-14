@@ -2,6 +2,7 @@
 
 import json, psycopg2
 from datetime import datetime
+from datetime import datetime, timezone
 
 DATABASE_URL = "postgresql://postgres:imTvuBaFtWGKRyswpGAKVYZEgHzJnliV@switchback.proxy.rlwy.net:35783/railway"
 
@@ -25,7 +26,7 @@ def migrate_scores(cur):
         username = d.get("username", "unknown")
         score = d.get("score", 0)
         tier = valid_tier(d.get("tier"))
-        updated_at = d.get("updated_at", datetime.utcnow().isoformat())
+        updated_at = d.get("updated_at", datetime.now(timezone.utc).isoformat())
 
         cur.execute("""
             INSERT INTO scores (uid, username, score, tier, updated_at)
