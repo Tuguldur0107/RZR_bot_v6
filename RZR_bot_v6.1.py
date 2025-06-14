@@ -1605,12 +1605,21 @@ async def resync(interaction: discord.Interaction):
     await bot.tree.sync()
     await interaction.response.send_message("🔄 Коммандууд амжилттай sync хийгдлээ.", ephemeral=True)
 
-# 🚀 Run
+# 🎯 Run
 async def main():
+    from keep_alive import keep_alive
+    keep_alive()  # 🟢 Railway дээр амьд байлгах сервер
+
     if not TOKEN:
-        print("❌ DISCORD_TOKEN тохируулаагүй байна.")
+        print("❌ DISCORD_TOKEN тохируулагдаагүй байна.")
         return
+
+    print("🚀 Bot эхлэх гэж байна...")
     await bot.start(TOKEN)
 
+
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())
+
+
