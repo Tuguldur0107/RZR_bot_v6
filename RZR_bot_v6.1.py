@@ -102,17 +102,17 @@ def tier_score(data: dict) -> int:
     score = data.get("score", 0)
     return TIER_WEIGHT.get(tier, 0) + score
 
-def promote_tier(tier):  # ахих
+def promote_tier(tier):  # ахих (өргөмжлөх)
     try:
         i = TIER_ORDER.index(tier)
-        return TIER_ORDER[min(i + 1, len(TIER_ORDER) - 1)]
+        return TIER_ORDER[max(i - 1, 0)]  # дээш ахих → index бууруулна
     except:
         return tier
 
-def demote_tier(tier):  # буурах
+def demote_tier(tier):  # буурах (доошлох)
     try:
         i = TIER_ORDER.index(tier)
-        return TIER_ORDER[max(i - 1, 0)]
+        return TIER_ORDER[min(i + 1, len(TIER_ORDER) - 1)]  # доош буух → index нэмэгдэнэ
     except:
         return tier
 
@@ -1329,10 +1329,10 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
 
         while score >= 5:
             tier = promote_tier(tier)
-            score -= 5
+            score = 0
         while score <= -5:
             tier = demote_tier(tier)
-            score += 5
+            score = 0
 
         data["score"] = score
         data["tier"] = tier
