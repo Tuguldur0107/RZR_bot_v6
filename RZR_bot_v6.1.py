@@ -74,6 +74,17 @@ TIER_ORDER = [
 ]
 TIER_WEIGHT = {tier: i*5 for i, tier in enumerate(TIER_ORDER)}
 
+TIER_WEIGHT = {
+    tier: (len(TIER_ORDER) - i - 1) * 5
+    for i, tier in enumerate(TIER_ORDER)
+}
+
+def calculate_weight(data):
+    tier = data.get("tier", "4-1")
+    score = data.get("score", 0)
+    tier_weight = TIER_WEIGHT.get(tier, 0)
+    return max(tier_weight + score, 0)
+
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -333,7 +344,6 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
         print("❌ start_match бүхэлдээ гацлаа:", e)
         await interaction.followup.send("⚠️ Session эхлүүлэхэд алдаа гарлаа.")
 
-
 @bot.tree.command(name="addme", description="Тоглогч өөрийгөө бүртгүүлнэ")
 async def addme(interaction: discord.Interaction):
     try:
@@ -377,7 +387,6 @@ async def addme(interaction: discord.Interaction):
         print("❌ addme бүхэлдээ алдаа:", e)
         await interaction.followup.send("⚠️ Бүртгэх үед алдаа гарлаа.")
 
-
 @bot.tree.command(name="show_added_players", description="Бүртгэгдсэн тоглогчдыг харуулна")
 async def show_added_players(interaction: discord.Interaction):
     try:
@@ -386,7 +395,6 @@ async def show_added_players(interaction: discord.Interaction):
         return
 
     try:
-        # 🧠 Session-г SQL-оос ачааж баталгаажуулна
         session = await load_session_state()
         if not session:
             await interaction.followup.send("⚠️ Session ачаалахад алдаа гарлаа.")
@@ -405,14 +413,14 @@ async def show_added_players(interaction: discord.Interaction):
                 try:
                     mentions.append(member.mention)
                 except Exception as e:
-                    print(f"⚠️ mention parse error for {uid}: {e}")
+                    print(f"⚠️ mention алдаа uid={uid}:", e)
 
         if not mentions:
-            await interaction.followup.send("⚠️ Хэрэглэгчдийн нэрсийг олж чадсангүй.")
+            await interaction.followup.send("⚠️ Discord серверээс нэрсийг ачаалж чадсангүй.")
             return
 
-        mention_text = "\n".join(mentions)
-        await interaction.followup.send(f"📋 Бүртгэгдсэн тоглогчид ({len(mentions)}):\n{mention_text}")
+        text = "\n".join(mentions)
+        await interaction.followup.send(f"📋 Бүртгэгдсэн {len(mentions)} тоглогч:\n{text}")
 
     except Exception as e:
         print("❌ show_added_players алдаа:", e)
@@ -464,7 +472,6 @@ async def remove(interaction: discord.Interaction):
     except Exception as e:
         print("❌ /remove command бүхэлдээ алдаа:", e)
         await interaction.followup.send("⚠️ Хасах үед алдаа гарлаа.")
-
 
 @bot.tree.command(name="remove_user", description="Админ: тоглогчийг бүртгэлээс хасна")
 @app_commands.describe(mention="Хасах тоглогчийг mention хийнэ")
@@ -658,17 +665,20 @@ async def go_bot(interaction: discord.Interaction):
         await interaction.followup.send("⚠️ Бүртгэгдсэн тоглогч алга байна.", ephemeral=True)
         return
 
+    # ✅ Жин тооцох
     weights_all = {}
     for uid in player_ids:
         data = await get_score(uid)
         if data:
-            weights_all[uid] = TIER_WEIGHT.get(data.get("tier", "4-1"), 0) + data.get("score", 0)
+            weights_all[uid] = calculate_weight(data)
 
+    # 🎯 Top N тоглогч
     sorted_players = sorted(weights_all.items(), key=lambda x: x[1], reverse=True)
     trimmed_players = sorted_players[:total_slots]
     player_weights = dict(trimmed_players)
     left_out_players = sorted_players[total_slots:]
 
+    # 🧠 3 төрлийн хуваарилалт
     snake = snake_teams(player_weights, team_count, players_per_team)
     greedy = greedy_teams(player_weights, team_count, players_per_team)
     reflector = reflector_teams(player_weights, team_count, players_per_team)
@@ -684,6 +694,7 @@ async def go_bot(interaction: discord.Interaction):
     TEAM_SETUP["strategy"] = strategy
     GAME_SESSION["last_win_time"] = datetime.now(timezone.utc)
 
+    # 💾 Session хадгалах
     try:
         await save_session_state({
             "active": GAME_SESSION["active"],
@@ -700,6 +711,7 @@ async def go_bot(interaction: discord.Interaction):
     except Exception as e:
         print("❌ save_session_state алдаа /go_bot:", e)
 
+    # 📋 Мессеж формат
     guild = interaction.guild
     lines = [f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{best_diff}`)\n"]
     for i, team in enumerate(best_teams, start=1):
@@ -719,10 +731,11 @@ async def go_bot(interaction: discord.Interaction):
         lines.append(f"⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {out}")
 
     is_ranked = players_per_team in [4, 5] and team_count >= 2
-    lines.append("\n" + ("🏅 Энэ match: **Ranked** ✅ (оноо тооцно)" if is_ranked else "⚠️ Энэ match: **Ranked биш** ❌ (оноо тооцохгүй)"))
+    lines.append("\n" + ("🏅 Энэ match: **Ranked** ✅ (оноо тооцно)" if is_ranked else "⚠️ Энэ match: **Ranked биш** ❌"))
 
     await interaction.followup.send("".join(lines))
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
+
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 async def go_gpt(interaction: discord.Interaction):
@@ -1277,7 +1290,6 @@ async def undo_last_match(interaction: discord.Interaction):
         f"💀 Loser-ууд: {lose_mentions}"
     )
     await interaction.followup.send("✅ Match бүртгэл цэвэрлэгдлээ.")
-
 
 @bot.tree.command(name="my_score", description="Таны оноо болон tier-г харуулна")
 async def my_score(interaction: discord.Interaction):
