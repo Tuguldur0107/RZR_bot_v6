@@ -778,26 +778,26 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
         return
 
+    if not GAME_SESSION["active"] or not TEAM_SETUP.get("teams"):
+        await interaction.followup.send("⚠️ Session идэвхгүй эсвэл багууд бүрдээгүй байна.")
+        return
+
     is_admin = interaction.user.guild_permissions.administrator
     is_initiator = interaction.user.id == TEAM_SETUP.get("initiator_id")
     if not (is_admin or is_initiator):
-        await interaction.followup.send("⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн ажиллуулж чадна.", ephemeral=True)
-        return
-
-    if not GAME_SESSION["active"] or not TEAM_SETUP.get("teams"):
-        await interaction.followup.send("⚠️ Session идэвхгүй эсвэл багууд бүрдээгүй байна.", ephemeral=True)
+        await interaction.followup.send("⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн ажиллуулж чадна.")
         return
 
     try:
         win_indexes = [int(x.strip()) - 1 for x in winner_teams.strip().split()]
         lose_indexes = [int(x.strip()) - 1 for x in loser_teams.strip().split()]
     except ValueError:
-        await interaction.followup.send("⚠️ Багийн дугааруудыг зөв оруулна уу (ж: 1 3)", ephemeral=True)
+        await interaction.followup.send("⚠️ Багийн дугааруудыг зөв оруулна уу (ж: 1 3)")
         return
 
     all_teams = TEAM_SETUP["teams"]
     if any(i < 0 or i >= len(all_teams) for i in win_indexes + lose_indexes):
-        await interaction.followup.send("⚠️ Багийн дугаар буруу байна.", ephemeral=True)
+        await interaction.followup.send("⚠️ Багийн дугаар буруу байна.")
         return
 
     winners = [uid for i in win_indexes for uid in all_teams[i]]
@@ -805,113 +805,129 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     now = datetime.now(timezone.utc)
     guild = interaction.guild
 
-    tier_list = list(TIER_WEIGHT.keys())
-    def validate_tier(tier): return tier if tier in tier_list else "4-1"
+    def validate_tier(tier): return tier if tier in TIER_ORDER else "4-1"
 
     def adjust_score(data, delta):
         data["score"] += delta
         if data["score"] >= 5:
-            cur_index = tier_list.index(data["tier"])
-            if cur_index + 1 < len(tier_list):
-                data["tier"] = tier_list[cur_index + 1]
+            if TIER_ORDER.index(data["tier"]) + 1 < len(TIER_ORDER):
+                data["tier"] = TIER_ORDER[TIER_ORDER.index(data["tier"]) + 1]
             data["score"] = 0
         elif data["score"] <= -5:
-            cur_index = tier_list.index(data["tier"])
-            if cur_index - 1 >= 0:
-                data["tier"] = tier_list[cur_index - 1]
+            if TIER_ORDER.index(data["tier"]) - 1 >= 0:
+                data["tier"] = TIER_ORDER[TIER_ORDER.index(data["tier"]) - 1]
             data["score"] = 0
         return data
 
-    winner_details = []
+    winner_details, loser_details = [], []
+
     for uid in winners:
-        data = await get_score(uid) or get_default_tier()
-        old_score, old_tier = data["score"], data["tier"]
-        data["tier"] = validate_tier(data.get("tier"))
-        data = adjust_score(data, +1)
-        member = guild.get_member(uid)
-        data["username"] = member.display_name if member else "Unknown"
-        await upsert_score(uid, data["score"], data["tier"], data["username"])
-        await log_score_transaction(uid, +1, data["score"], data["tier"], "set_match_result")
-        await update_player_stats(uid, is_win=True)
-        winner_details.append({
-            "uid": uid, "username": data["username"],
-            "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
-            "old_score": old_score, "new_score": data["score"],
-            "old_tier": old_tier, "new_tier": data["tier"], "delta": +1
-        })
+        try:
+            data = await get_score(uid) or get_default_tier()
+            old_score, old_tier = data["score"], data["tier"]
+            data["tier"] = validate_tier(data["tier"])
+            data = adjust_score(data, +1)
+            member = guild.get_member(uid)
+            data["username"] = member.display_name if member else "Unknown"
+            await upsert_score(uid, data["score"], data["tier"], data["username"])
+            await log_score_transaction(uid, +1, data["score"], data["tier"], "set_match_result")
+            await update_player_stats(uid, is_win=True)
+            winner_details.append({
+                "uid": uid, "username": data["username"],
+                "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
+                "old_score": old_score, "new_score": data["score"],
+                "old_tier": old_tier, "new_tier": data["tier"], "delta": +1
+            })
+        except Exception as e:
+            print(f"❌ Winner uid:{uid} update fail:", e)
 
-    loser_details = []
     for uid in losers:
-        data = await get_score(uid) or get_default_tier()
-        old_score, old_tier = data["score"], data["tier"]
-        data["tier"] = validate_tier(data.get("tier"))
-        data = adjust_score(data, -1)
-        member = guild.get_member(uid)
-        data["username"] = member.display_name if member else "Unknown"
-        await upsert_score(uid, data["score"], data["tier"], data["username"])
-        await log_score_transaction(uid, -1, data["score"], data["tier"], "set_match_result")
-        await update_player_stats(uid, is_win=False)
-        loser_details.append({
-            "uid": uid, "username": data["username"],
-            "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
-            "old_score": old_score, "new_score": data["score"],
-            "old_tier": old_tier, "new_tier": data["tier"], "delta": -1
-        })
+        try:
+            data = await get_score(uid) or get_default_tier()
+            old_score, old_tier = data["score"], data["tier"]
+            data["tier"] = validate_tier(data["tier"])
+            data = adjust_score(data, -1)
+            member = guild.get_member(uid)
+            data["username"] = member.display_name if member else "Unknown"
+            await upsert_score(uid, data["score"], data["tier"], data["username"])
+            await log_score_transaction(uid, -1, data["score"], data["tier"], "set_match_result")
+            await update_player_stats(uid, is_win=False)
+            loser_details.append({
+                "uid": uid, "username": data["username"],
+                "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
+                "old_score": old_score, "new_score": data["score"],
+                "old_tier": old_tier, "new_tier": data["tier"], "delta": -1
+            })
+        except Exception as e:
+            print(f"❌ Loser uid:{uid} update fail:", e)
 
-    await save_last_match(winners, losers)
+    try:
+        await update_nicknames_for_users(guild, [p["uid"] for p in winner_details + loser_details])
+    except Exception as e:
+        print("⚠️ nickname update error:", e)
+
+    try:
+        await save_last_match(winners, losers)
+    except Exception as e:
+        print("⚠️ save_last_match алдаа:", e)
+
     GAME_SESSION["last_win_time"] = now
-
-    await update_nicknames_for_users(guild, [p["uid"] for p in winner_details + loser_details])
 
     win_str = " ".join(str(i+1) for i in win_indexes)
     lose_str = " ".join(str(i+1) for i in lose_indexes)
     lines = [f"🏆 {win_str}-р баг(ууд) ялж {lose_str}-р баг ялагдлаа.\nОноо, tier шинэчлэгдлээ.\n"]
 
-    if winner_details:
-        lines.append(f"\n\n✅ {win_str}-р багийн **ялсан суперүүд:**")
-        for p in winner_details:
-            change = ""
-            if p["old_tier"] != p["new_tier"]:
-                change = " ⬆" if TIER_ORDER.index(p["new_tier"]) < TIER_ORDER.index(p["old_tier"]) else " ⬇"
-            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+    for p in winner_details:
+        change = ""
+        if p["old_tier"] != p["new_tier"]:
+            change = " ⬆" if TIER_ORDER.index(p["new_tier"]) > TIER_ORDER.index(p["old_tier"]) else " ⬇"
+        lines.append(f"✅ <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
 
-    if loser_details:
-        lines.append(f"\n\n💀 {lose_str}-р багийн **ялагдсан сугууд:**")
-        for p in loser_details:
-            change = ""
-            if p["old_tier"] != p["new_tier"]:
-                change = " ⬆" if TIER_ORDER.index(p["new_tier"]) < TIER_ORDER.index(p["old_tier"]) else " ⬇"
-            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+    for p in loser_details:
+        change = ""
+        if p["old_tier"] != p["new_tier"]:
+            change = " ⬆" if TIER_ORDER.index(p["new_tier"]) > TIER_ORDER.index(p["old_tier"]) else " ⬇"
+        lines.append(f"💀 <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
 
-    # 🧠 Match-ийг бүртгэнэ
-    all_players = [uid for team in TEAM_SETUP["teams"] for uid in team]
-    await insert_match(
-        timestamp=datetime.now(timezone.utc),
-        initiator_id=TEAM_SETUP.get("initiator_id", 0),
-        team_count=TEAM_SETUP.get("team_count", 2),
-        players_per_team=TEAM_SETUP.get("players_per_team", 5),
-        winners=winners,
-        losers=losers,
-        mode="manual",
-        strategy="NormalMatch",  # ✅
-        notes="set_match_result"  # ✅
-    )
+    # 🧠 Match лог бичих
+    try:
+        await insert_match(
+            timestamp=now,
+            initiator_id=TEAM_SETUP.get("initiator_id", 0),
+            team_count=TEAM_SETUP.get("team_count", 2),
+            players_per_team=TEAM_SETUP.get("players_per_team", 5),
+            winners=winners,
+            losers=losers,
+            mode="manual",
+            strategy="NormalMatch",
+            notes="set_match_result"
+        )
+    except Exception as e:
+        print("❌ insert_match алдаа:", e)
 
-    await interaction.followup.send("\n".join(lines))
-    await interaction.followup.send("✅ Match бүртгэгдлээ.")
+    # 📤 Нэг удаагийн followup
+    try:
+        await interaction.followup.send("\n".join(lines) + "\n✅ Match бүртгэгдлээ.")
+    except Exception as e:
+        print("❌ followup send алдаа:", e)
 
-    await save_session_state({
-        "active": GAME_SESSION["active"],
-        "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
-        "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
-        "initiator_id": TEAM_SETUP.get("initiator_id"),
-        "team_count": TEAM_SETUP.get("team_count"),
-        "players_per_team": TEAM_SETUP.get("players_per_team"),
-        "player_ids": TEAM_SETUP.get("player_ids"),
-        "teams": TEAM_SETUP.get("teams"),
-        "changed_players": TEAM_SETUP.get("changed_players"),
-        "strategy": TEAM_SETUP.get("strategy", "")
-    })
+    # 💾 Session хадгалах
+    try:
+        await save_session_state({
+            "active": GAME_SESSION["active"],
+            "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
+            "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
+            "initiator_id": TEAM_SETUP.get("initiator_id"),
+            "team_count": TEAM_SETUP.get("team_count"),
+            "players_per_team": TEAM_SETUP.get("players_per_team"),
+            "player_ids": TEAM_SETUP.get("player_ids"),
+            "teams": TEAM_SETUP.get("teams"),
+            "changed_players": TEAM_SETUP.get("changed_players"),
+            "strategy": TEAM_SETUP.get("strategy", "")
+        })
+    except Exception as e:
+        print("❌ session save алдаа:", e)
+
 
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
