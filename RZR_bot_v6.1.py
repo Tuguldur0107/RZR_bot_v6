@@ -521,6 +521,7 @@ async def set_match(interaction: discord.Interaction, team_number: int, mentions
     })
 
     await interaction.followup.send(f"✅ {len(user_ids)} тоглогчийг {team_number}-р багт бүртгэлээ.")
+    return  # ⬅️ энэ мөрийг заавал нэм
 
 @bot.tree.command(name="clear_match", description="Админ: одоогийн идэвхтэй match-ийн баг бүртгэлийг цэвэрлэнэ")
 async def clear_match(interaction: discord.Interaction):
@@ -670,6 +671,8 @@ async def go_bot(interaction: discord.Interaction):
 
     await interaction.followup.send("".join(lines))
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
+    
+    
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 async def go_gpt(interaction: discord.Interaction):
