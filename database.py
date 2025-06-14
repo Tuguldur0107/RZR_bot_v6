@@ -137,23 +137,34 @@ async def upsert_shield(uid: int, shields: int):
     """, uid, shields)
     await conn.close()
 
+# 🧠 Session state
 async def save_session_state(data: dict):
+    print("🧠 save_session_state дуудаж байна:", data)
+    if not data.get("player_ids"):
+        print("⚠️ player_ids байхгүй тул хадгалахгүй.")
+        raise ValueError("⚠️ Session-д player_ids байхгүй тул хадгалахгүй.")
+
     conn = await connect()
-    await conn.execute("DELETE FROM session_state")  # session-г цэвэрлээд дахин хадгална
     await conn.execute("INSERT INTO session_state (timestamp, data) VALUES ($1, $2)", datetime.now(), data)
     await conn.close()
+    print("✅ session_state хадгалагдлаа.")
+
+
 
 async def load_session_state():
-    conn = await connect()
-    row = await conn.fetchrow("SELECT data FROM session_state ORDER BY timestamp DESC LIMIT 1")
-    await conn.close()
-    return row["data"] if row else None
-
-async def clear_session_state():
-    conn = await connect()
-    await conn.execute("DELETE FROM session_state")
-    await conn.close()
-
+    try:
+        conn = await connect()
+        row = await conn.fetchrow("SELECT data FROM session_state ORDER BY timestamp DESC LIMIT 1")
+        await conn.close()
+        if row and "data" in row:
+            print("📥 session_state loaded:", row["data"])
+            return row["data"]
+        else:
+            print("⚠️ session_state хоосон байна")
+            return None
+    except Exception as e:
+        print("❌ load_session_state алдаа:", e)
+        return None
 
 
 async def get_player_stats(uid_list: list[int]):
