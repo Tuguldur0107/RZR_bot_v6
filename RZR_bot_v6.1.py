@@ -1189,7 +1189,7 @@ async def undo_last_match(interaction: discord.Interaction):
 @bot.tree.command(name="my_score", description="Таны оноо болон tier-г харуулна")
 async def my_score(interaction: discord.Interaction):
     try:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(thinking=True)  # ⬅️ public response
     except discord.errors.InteractionResponded:
         return
 
@@ -1209,6 +1209,7 @@ async def my_score(interaction: discord.Interaction):
         f"Tier: **{tier}**\n"
         f"Score: **{score}**"
     )
+
 
 @bot.tree.command(name="user_score", description="Бусад тоглогчийн оноо болон tier-г харуулна")
 @app_commands.describe(user="Оноог нь харах discord хэрэглэгч")
