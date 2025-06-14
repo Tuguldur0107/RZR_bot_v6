@@ -45,6 +45,7 @@ SCORE_LOG_FILE = f"{BASE_DIR}/score_log.jsonl"
 PLAYER_STATS_FILE = f"{BASE_DIR}/player_stats.json"
 SESSION_FILE = f"{BASE_DIR}/session.json"
 
+
 INFO_DIR = "Info"
 
 COMMANDS_FILE = f"{INFO_DIR}/commands.md"
