@@ -313,10 +313,12 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
         return
 
     try:
+        # 🧹 Хуучин session reset
         GAME_SESSION["active"] = False
         GAME_SESSION["start_time"] = None
         GAME_SESSION["last_win_time"] = None
 
+        # 🟢 Шинэ session эхлүүлнэ
         now = datetime.now(timezone.utc)
         GAME_SESSION["active"] = True
         GAME_SESSION["start_time"] = now
@@ -330,8 +332,20 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
         TEAM_SETUP["changed_players"] = []
         TEAM_SETUP["initiator_id"] = interaction.user.id
 
+        # 💾 SQL-д session хадгална
         try:
-            await save_session_state(GAME_SESSION, TEAM_SETUP)
+            await save_session_state({
+                "active": GAME_SESSION["active"],
+                "start_time": GAME_SESSION["start_time"].isoformat(),
+                "last_win_time": GAME_SESSION["last_win_time"].isoformat(),
+                "initiator_id": TEAM_SETUP["initiator_id"],
+                "team_count": TEAM_SETUP["team_count"],
+                "players_per_team": TEAM_SETUP["players_per_team"],
+                "player_ids": TEAM_SETUP["player_ids"],
+                "teams": TEAM_SETUP["teams"],
+                "changed_players": TEAM_SETUP["changed_players"],
+                "strategy": TEAM_SETUP.get("strategy", "")
+            })
             print("✅ Session хадгалалт амжилттай")
         except Exception as e:
             print("❌ save_session_state алдаа:", e)
@@ -343,6 +357,7 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
     except Exception as e:
         print("❌ start_match бүхэлдээ гацлаа:", e)
         await interaction.followup.send("⚠️ Session эхлүүлэхэд алдаа гарлаа.")
+
 
 @bot.tree.command(name="addme", description="Тоглогч өөрийгөө бүртгүүлнэ")
 async def addme(interaction: discord.Interaction):
@@ -574,6 +589,13 @@ async def set_match(interaction: discord.Interaction, team_number: int, mentions
 
     TEAM_SETUP["teams"][team_number - 1] = user_ids
 
+    # 📥 Багийн тоглогчдыг оноож, player_ids-д нэмнэ
+    TEAM_SETUP["teams"][team_number - 1] = user_ids
+    for uid in user_ids:
+        if uid not in TEAM_SETUP["player_ids"]:
+            TEAM_SETUP["player_ids"].append(uid)
+
+    # 💾 Session хадгалах
     try:
         await save_session_state({
             "active": GAME_SESSION["active"],
@@ -656,45 +678,45 @@ async def go_bot(interaction: discord.Interaction):
         await interaction.followup.send("⚠️ Session идэвхгүй байна.", ephemeral=True)
         return
 
-    team_count = TEAM_SETUP["team_count"]
-    players_per_team = TEAM_SETUP["players_per_team"]
+    team_count = TEAM_SETUP.get("team_count")
+    players_per_team = TEAM_SETUP.get("players_per_team")
     total_slots = team_count * players_per_team
-    player_ids = TEAM_SETUP["player_ids"]
+    player_ids = TEAM_SETUP.get("player_ids", [])
 
     if not player_ids:
         await interaction.followup.send("⚠️ Бүртгэгдсэн тоглогч алга байна.", ephemeral=True)
         return
 
-    # ✅ Жин тооцох
-    weights_all = {}
+    # ✅ Оноо + tier-ийн жин тооцно
+    player_weights = {}
     for uid in player_ids:
         data = await get_score(uid)
         if data:
-            weights_all[uid] = calculate_weight(data)
+            player_weights[uid] = calculate_weight(data)
 
-    # 🎯 Top N тоглогч
-    sorted_players = sorted(weights_all.items(), key=lambda x: x[1], reverse=True)
+    sorted_players = sorted(player_weights.items(), key=lambda x: x[1], reverse=True)
     trimmed_players = sorted_players[:total_slots]
-    player_weights = dict(trimmed_players)
+    trimmed_weights = dict(trimmed_players)
     left_out_players = sorted_players[total_slots:]
 
-    # 🧠 3 төрлийн хуваарилалт
-    snake = snake_teams(player_weights, team_count, players_per_team)
-    greedy = greedy_teams(player_weights, team_count, players_per_team)
-    reflector = reflector_teams(player_weights, team_count, players_per_team)
+    # 🧠 Хуваарилалтын 3 хувилбар
+    snake = snake_teams(trimmed_weights, team_count, players_per_team)
+    greedy = greedy_teams(trimmed_weights, team_count, players_per_team)
+    reflector = reflector_teams(trimmed_weights, team_count, players_per_team)
 
     strategy_diffs = {
-        "snake": (snake, total_weight_difference(snake, player_weights)),
-        "greedy": (greedy, total_weight_difference(greedy, player_weights)),
-        "reflector": (reflector, total_weight_difference(reflector, player_weights))
+        "snake": (snake, total_weight_difference(snake, trimmed_weights)),
+        "greedy": (greedy, total_weight_difference(greedy, trimmed_weights)),
+        "reflector": (reflector, total_weight_difference(reflector, trimmed_weights))
     }
 
     strategy, (best_teams, best_diff) = min(strategy_diffs.items(), key=lambda x: x[1][1])
+
+    # 💾 Session хадгалах
     TEAM_SETUP["teams"] = best_teams
     TEAM_SETUP["strategy"] = strategy
     GAME_SESSION["last_win_time"] = datetime.now(timezone.utc)
 
-    # 💾 Session хадгалах
     try:
         await save_session_state({
             "active": GAME_SESSION["active"],
@@ -706,23 +728,23 @@ async def go_bot(interaction: discord.Interaction):
             "player_ids": TEAM_SETUP.get("player_ids"),
             "teams": TEAM_SETUP.get("teams"),
             "changed_players": TEAM_SETUP.get("changed_players", []),
-            "strategy": TEAM_SETUP.get("strategy", "")
+            "strategy": strategy
         })
     except Exception as e:
         print("❌ save_session_state алдаа /go_bot:", e)
 
-    # 📋 Мессеж формат
+    # 📋 Харуулах формат
     guild = interaction.guild
     lines = [f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{best_diff}`)\n"]
+
     for i, team in enumerate(best_teams, start=1):
-        total = sum(player_weights.get(uid, 0) for uid in team)
-        leader = max(team, key=lambda uid: player_weights.get(uid, 0))
-        leader_name = guild.get_member(leader).display_name if guild.get_member(leader) else str(leader)
+        total = sum(trimmed_weights.get(uid, 0) for uid in team)
+        leader = max(team, key=lambda uid: trimmed_weights.get(uid, 0))
         lines.append(f"# {i}-р баг (нийт оноо: {total})\n")
         for uid in team:
             member = guild.get_member(uid)
             name = member.display_name if member else str(uid)
-            score = player_weights.get(uid, 0)
+            score = trimmed_weights.get(uid, 0)
             lines.append(f"{name} ({score})" + (" 😎 Team Leader\n" if uid == leader else "\n"))
         lines.append("\n")
 
@@ -735,7 +757,6 @@ async def go_bot(interaction: discord.Interaction):
 
     await interaction.followup.send("".join(lines))
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
-
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 async def go_gpt(interaction: discord.Interaction):
@@ -839,6 +860,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     except discord.errors.InteractionResponded:
         return
 
+    # ⚠️ Шалгалтууд
     if not (TEAM_SETUP.get("players_per_team") in [4, 5] and TEAM_SETUP.get("team_count", 0) >= 2):
         await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
         return
@@ -886,6 +908,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
 
     winner_details, loser_details = [], []
 
+    # ✅ Winners
     for uid in winners:
         try:
             data = await get_score(uid) or get_default_tier()
@@ -906,6 +929,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         except Exception as e:
             print(f"❌ Winner uid:{uid} update fail:", e)
 
+    # ❌ Losers
     for uid in losers:
         try:
             data = await get_score(uid) or get_default_tier()
@@ -926,28 +950,15 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         except Exception as e:
             print(f"❌ Loser uid:{uid} update fail:", e)
 
+    # 🧠 Nickname шинэчлэлт
     try:
         await update_nicknames_for_users(guild, [p["uid"] for p in winner_details + loser_details])
     except Exception as e:
         print("⚠️ nickname update error:", e)
 
+    # 🧾 Match log
     try:
         await save_last_match(winners, losers)
-    except Exception as e:
-        print("⚠️ save_last_match алдаа:", e)
-
-    GAME_SESSION["last_win_time"] = now
-
-    lines = [f"🏆 {', '.join(str(i+1) for i in win_indexes)} ялсан, {', '.join(str(i+1) for i in lose_indexes)} ялагдсан. Tier/оноо шинэчлэгдлээ.\n"]
-
-    for p in winner_details + loser_details:
-        old_idx = TIER_ORDER.index(p["old_tier"])
-        new_idx = TIER_ORDER.index(p["new_tier"])
-        change = " ⬆" if new_idx > old_idx else (" ⬇" if new_idx < old_idx else "")
-        prefix = "✅" if p in winner_details else "💀"
-        lines.append(f"{prefix} <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
-
-    try:
         await insert_match(
             timestamp=now,
             initiator_id=TEAM_SETUP.get("initiator_id", 0),
@@ -960,7 +971,30 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             notes="set_match_result"
         )
     except Exception as e:
-        print("❌ insert_match алдаа:", e)
+        print("❌ Match log алдаа:", e)
+
+    GAME_SESSION["last_win_time"] = now
+
+    # 📋 Мессеж format
+    win_str = ", ".join(f"{i+1}-р баг" for i in win_indexes)
+    lose_str = ", ".join(f"{i+1}-р баг" for i in lose_indexes)
+    lines = [f"🏆 {win_str} ялж {lose_str} ялагдлаа.\nОноо, Tier шинэчлэгдлээ."]
+
+    if winner_details:
+        lines.append("\n✅ Ялсан тоглогчид:")
+        for p in winner_details:
+            old_i = TIER_ORDER.index(p["old_tier"])
+            new_i = TIER_ORDER.index(p["new_tier"])
+            change = " ⬆" if new_i > old_i else (" ⬇" if new_i < old_i else "")
+            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+
+    if loser_details:
+        lines.append("\n💀 Ялагдсан тоглогчид:")
+        for p in loser_details:
+            old_i = TIER_ORDER.index(p["old_tier"])
+            new_i = TIER_ORDER.index(p["new_tier"])
+            change = " ⬆" if new_i > old_i else (" ⬇" if new_i < old_i else "")
+            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
 
     try:
         await interaction.followup.send("\n".join(lines) + "\n✅ Match бүртгэгдлээ.")
@@ -977,11 +1011,12 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             "players_per_team": TEAM_SETUP.get("players_per_team"),
             "player_ids": TEAM_SETUP.get("player_ids"),
             "teams": TEAM_SETUP.get("teams"),
-            "changed_players": TEAM_SETUP.get("changed_players"),
+            "changed_players": TEAM_SETUP.get("changed_players", []),
             "strategy": TEAM_SETUP.get("strategy", "")
         })
     except Exception as e:
         print("❌ session save алдаа:", e)
+
 
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -1081,30 +1116,15 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         except Exception as e:
             print(f"❌ Loser uid:{uid} update fail:", e)
 
+    # 🧠 Nickname шинэчлэлт
     try:
         await update_nicknames_for_users(guild, [p["uid"] for p in winner_details + loser_details])
     except Exception as e:
         print("⚠️ nickname update error:", e)
 
+    # 🧾 Match log
     try:
         await save_last_match(winners, losers)
-    except Exception as e:
-        print("⚠️ save_last_match алдаа:", e)
-
-    GAME_SESSION["last_win_time"] = now
-
-    win_str = " ".join(str(i+1) for i in win_indexes)
-    lose_str = " ".join(str(i+1) for i in lose_indexes)
-    lines = [f"💦 {win_str}-р баг(ууд) **Fountain ялж** {lose_str}-р баг ялагдлаа.\nОноо, tier шинэчлэгдлээ.\n"]
-
-    for p in winner_details + loser_details:
-        old = TIER_ORDER.index(p["old_tier"])
-        new = TIER_ORDER.index(p["new_tier"])
-        change = " ⬆" if new > old else (" ⬇" if new < old else "")
-        prefix = "✅" if p in winner_details else "💀"
-        lines.append(f"{prefix} <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
-
-    try:
         await insert_match(
             timestamp=now,
             initiator_id=TEAM_SETUP.get("initiator_id", 0),
@@ -1117,7 +1137,30 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             notes="set_match_result_fountain"
         )
     except Exception as e:
-        print("❌ insert_match алдаа:", e)
+        print("❌ Match log алдаа:", e)
+
+    GAME_SESSION["last_win_time"] = now
+
+    # 📋 Мессеж format
+    win_str = ", ".join(f"{i+1}-р баг" for i in win_indexes)
+    lose_str = ", ".join(f"{i+1}-р баг" for i in lose_indexes)
+    lines = [f"💦 {win_str} Fountain ялж {lose_str} ялагдлаа.\nОноо, Tier шинэчлэгдлээ."]
+
+    if winner_details:
+        lines.append("\n✅ Ялсан тоглогчид:")
+        for p in winner_details:
+            old_i = TIER_ORDER.index(p["old_tier"])
+            new_i = TIER_ORDER.index(p["new_tier"])
+            change = " ⬆" if new_i > old_i else (" ⬇" if new_i < old_i else "")
+            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+
+    if loser_details:
+        lines.append("\n💀 Ялагдсан тоглогчид:")
+        for p in loser_details:
+            old_i = TIER_ORDER.index(p["old_tier"])
+            new_i = TIER_ORDER.index(p["new_tier"])
+            change = " ⬆" if new_i > old_i else (" ⬇" if new_i < old_i else "")
+            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
 
     try:
         await interaction.followup.send("\n".join(lines) + "\n✅ Match бүртгэгдлээ.")
@@ -1134,11 +1177,12 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             "players_per_team": TEAM_SETUP.get("players_per_team"),
             "player_ids": TEAM_SETUP.get("player_ids"),
             "teams": TEAM_SETUP.get("teams"),
-            "changed_players": TEAM_SETUP.get("changed_players"),
+            "changed_players": TEAM_SETUP.get("changed_players", []),
             "strategy": TEAM_SETUP.get("strategy", "")
         })
     except Exception as e:
         print("❌ session save алдаа:", e)
+
 
 @bot.tree.command(name="change_player", description="Багийн гишүүдийг солих")
 @app_commands.describe(
