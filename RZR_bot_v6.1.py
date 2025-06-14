@@ -671,8 +671,6 @@ async def go_bot(interaction: discord.Interaction):
 
     await interaction.followup.send("".join(lines))
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
-    
-    
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 async def go_gpt(interaction: discord.Interaction):
