@@ -10,6 +10,9 @@ import json
 from database import update_player_stats
 from database import connect
 from dotenv import load_dotenv
+import asyncpg
+from database import init_pool
+from database import pool  # энэ заавал байх ёстой
 from database import (
     # 🎯 Score & tier
     get_score, upsert_score, get_all_scores, get_default_tier,
@@ -223,6 +226,7 @@ async def insert_match(
     strategy: str,
     notes: str = ""
 ):
+    pool = await asyncpg.create_pool(...)
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO matches (
@@ -280,6 +284,8 @@ async def update_nicknames_for_users(guild, user_ids: list):
 async def on_ready():
     print(f"🤖 Bot нэвтэрлээ: {bot.user}")
     await bot.tree.sync()
+    await init_pool()
+    print("✅ Bot started & DB pool initialized.")
     asyncio.create_task(session_timeout_checker())
 
 # 🧩 Command: ping

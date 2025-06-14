@@ -2,6 +2,7 @@
 import asyncpg
 import os
 from datetime import datetime
+from dotenv import load_dotenv
 
 DB_URL = os.getenv("DATABASE_URL")
 
@@ -9,6 +10,17 @@ async def connect():
     return await asyncpg.connect(DB_URL)
 
 # database.py файлд дараах функцуудыг нэм:
+
+
+load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+pool = None
+
+async def init_pool():
+    global pool
+    if pool is None:
+        pool = await asyncpg.create_pool(DATABASE_URL)
 
 async def get_all_scores():
     conn = await connect()
