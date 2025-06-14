@@ -541,21 +541,7 @@ async def set_match(interaction: discord.Interaction, team_number: int, mentions
     all_existing_ids = [uid for team in session["teams"] for uid in team]
     duplicate_ids = [uid for uid in user_ids if uid in all_existing_ids]
     if duplicate_ids:
-        await interaction.followup.send("🚫 Зарим тоглогч аль нэг багт бүртгэгдсэн байна.", ephemeral=True)
-        return
-
-    # ➕ Багт оноож, player_ids-д нэмнэ
-    session["teams"][team_number - 1] = user_ids
-    for uid in user_ids:
-        if uid not in session["player_ids"]:
-            session["player_ids"].append(uid)
-
-    try:
-        await save_session_state(session)
-    except Exception as e:
-        print("❌ save_session_state алдаа:", e)
-
-    await interaction.followup.send(f"✅ {len(user_ids)} тоглогчийг {team_number}-р багт бүртгэлээ.")
+        await interaction.followup.send("🚫 Зарим тоглогч аль нэг багт бүртгэгд
 
 
 @bot.tree.command(name="clear_match", description="Админ: одоогийн идэвхтэй match-ийн баг бүртгэлийг цэвэрлэнэ")
