@@ -72,12 +72,14 @@ TIER_ORDER = [
     "4-1", "4-2", "4-3", "4-4", "4-5",
     "5-1", "5-2", "5-3", "5-4", "5-5"
 ]
-TIER_WEIGHT = {tier: i*5 for i, tier in enumerate(TIER_ORDER)}
-
 TIER_WEIGHT = {
-    tier: (len(TIER_ORDER) - i - 1) * 5
-    for i, tier in enumerate(TIER_ORDER)
+    "1-1": 120, "1-2": 115, "1-3": 110, "1-4": 105, "1-5": 100,
+    "2-1":  95, "2-2":  90, "2-3":  85, "2-4":  80, "2-5":  75,
+    "3-1":  70, "3-2":  65, "3-3":  60, "3-4":  55, "3-5":  50,
+    "4-1":  45, "4-2":  40, "4-3":  35, "4-4":  30, "4-5":  25,
+    "5-1":  20, "5-2":  15, "5-3":  10, "5-4":   5, "5-5":   0
 }
+
 
 def calculate_weight(data):
     tier = data.get("tier", "4-1")
@@ -116,14 +118,14 @@ def tier_score(data: dict) -> int:
 def promote_tier(tier):  # ахих (өргөмжлөх)
     try:
         i = TIER_ORDER.index(tier)
-        return TIER_ORDER[max(i - 1, 0)]  # дээш ахих → index бууруулна
+        return TIER_ORDER[max(i + 1, 0)]  # дээш ахих → index бууруулна
     except:
         return tier
 
 def demote_tier(tier):  # буурах (доошлох)
     try:
         i = TIER_ORDER.index(tier)
-        return TIER_ORDER[min(i + 1, len(TIER_ORDER) - 1)]  # доош буух → index нэмэгдэнэ
+        return TIER_ORDER[min(i - 1, len(TIER_ORDER) - 1)]  # доош буух → index нэмэгдэнэ
     except:
         return tier
 
@@ -690,9 +692,8 @@ async def go_bot(interaction: discord.Interaction):
     # ✅ Оноо + tier-ийн жин тооцно
     player_weights = {}
     for uid in player_ids:
-        data = await get_score(uid)
-        if data:
-            player_weights[uid] = calculate_weight(data)
+        data = await get_score(uid) or get_default_tier()  # 🧩 ШИНЭ тоглогчдод default tier өгнө
+        player_weights[uid] = calculate_weight(data)
 
     sorted_players = sorted(player_weights.items(), key=lambda x: x[1], reverse=True)
     trimmed_players = sorted_players[:total_slots]
@@ -735,12 +736,14 @@ async def go_bot(interaction: discord.Interaction):
 
     # 📋 Харуулах формат
     guild = interaction.guild
+    team_emojis = ["🏆", "💎", "🔥", "🚀", "🛡️", "🎯", "🎮", "🧠", "📦", "⚡️"]
     lines = [f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{best_diff}`)\n"]
 
     for i, team in enumerate(best_teams, start=1):
+        emoji = team_emojis[i - 1] if i - 1 < len(team_emojis) else "🏅"
         total = sum(trimmed_weights.get(uid, 0) for uid in team)
         leader = max(team, key=lambda uid: trimmed_weights.get(uid, 0))
-        lines.append(f"# {i}-р баг (нийт оноо: {total})\n")
+        lines.append(f"{emoji} **#{i}-р баг** (нийт оноо: {total}) 😎\n")
         for uid in team:
             member = guild.get_member(uid)
             name = member.display_name if member else str(uid)
@@ -776,17 +779,17 @@ async def go_gpt(interaction: discord.Interaction):
         await interaction.followup.send("⚠️ Session идэвхгүй байна.", ephemeral=True)
         return
 
-    team_count = TEAM_SETUP["team_count"]
-    players_per_team = TEAM_SETUP["players_per_team"]
+    team_count = TEAM_SETUP.get("team_count")
+    players_per_team = TEAM_SETUP.get("players_per_team")
     total_slots = team_count * players_per_team
-    player_ids = TEAM_SETUP["player_ids"]
+    player_ids = TEAM_SETUP.get("player_ids", [])
 
+    # ✅ Оноо + tier-ийн жин
     all_scores = []
     for uid in player_ids:
-        data = await get_score(uid)
-        if data:
-            power = TIER_WEIGHT.get(data.get("tier", "4-1"), 0) + data.get("score", 0)
-            all_scores.append({"id": uid, "power": power})
+        data = await get_score(uid) or get_default_tier()
+        power = TIER_WEIGHT.get(data.get("tier", "4-1"), 0) + data.get("score", 0)
+        all_scores.append({"id": uid, "power": power})
 
     sorted_players = sorted(all_scores, key=lambda x: x["power"], reverse=True)
     selected_players = sorted_players[:total_slots]
@@ -794,7 +797,7 @@ async def go_gpt(interaction: discord.Interaction):
     score_map = {p["id"]: p["power"] for p in selected_players}
 
     try:
-        teams = call_gpt_balance_api(team_count, players_per_team, selected_players)
+        teams = await call_gpt_balance_api(team_count, players_per_team, selected_players)
     except Exception as e:
         print("❌ GPT API error:", e)
         await interaction.followup.send(
@@ -816,7 +819,7 @@ async def go_gpt(interaction: discord.Interaction):
         "players_per_team": TEAM_SETUP.get("players_per_team"),
         "player_ids": TEAM_SETUP.get("player_ids"),
         "teams": TEAM_SETUP.get("teams"),
-        "changed_players": TEAM_SETUP.get("changed_players"),
+        "changed_players": TEAM_SETUP.get("changed_players", []),
         "strategy": "gpt"
     })
 
@@ -849,6 +852,7 @@ async def go_gpt(interaction: discord.Interaction):
     await interaction.followup.send("".join(lines))
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
 
+
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
 @app_commands.describe(
     winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)",
@@ -860,7 +864,6 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     except discord.errors.InteractionResponded:
         return
 
-    # ⚠️ Шалгалтууд
     if not (TEAM_SETUP.get("players_per_team") in [4, 5] and TEAM_SETUP.get("team_count", 0) >= 2):
         await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
         return
@@ -897,18 +900,19 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     def adjust_score(data, delta):
         data["score"] += delta
         if data["score"] >= 5:
-            if TIER_ORDER.index(data["tier"]) + 1 < len(TIER_ORDER):
-                data["tier"] = TIER_ORDER[TIER_ORDER.index(data["tier"]) + 1]
+            idx = TIER_ORDER.index(data["tier"])
+            if idx + 1 < len(TIER_ORDER):
+                data["tier"] = TIER_ORDER[idx + 1]
             data["score"] = 0
         elif data["score"] <= -5:
-            if TIER_ORDER.index(data["tier"]) - 1 >= 0:
-                data["tier"] = TIER_ORDER[TIER_ORDER.index(data["tier"]) - 1]
+            idx = TIER_ORDER.index(data["tier"])
+            if idx - 1 >= 0:
+                data["tier"] = TIER_ORDER[idx - 1]
             data["score"] = 0
         return data
 
     winner_details, loser_details = [], []
 
-    # ✅ Winners
     for uid in winners:
         try:
             data = await get_score(uid) or get_default_tier()
@@ -916,20 +920,29 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             data["tier"] = validate_tier(data["tier"])
             data = adjust_score(data, +1)
             member = guild.get_member(uid)
-            data["username"] = member.display_name if member else "Unknown"
+            if member:
+                try:
+                    data["username"] = member.display_name
+                except Exception as e:
+                    print(f"⚠️ Cannot read nickname for {uid}: {e}")
+                    data["username"] = member.name
+            else:
+                data["username"] = "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
             await log_score_transaction(uid, +1, data["score"], data["tier"], "set_match_result")
             await update_player_stats(uid, is_win=True)
             winner_details.append({
-                "uid": uid, "username": data["username"],
+                "uid": uid,
+                "username": data["username"],
                 "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
-                "old_score": old_score, "new_score": data["score"],
-                "old_tier": old_tier, "new_tier": data["tier"]
+                "old_score": old_score,
+                "new_score": data["score"],
+                "old_tier": old_tier,
+                "new_tier": data["tier"]
             })
         except Exception as e:
             print(f"❌ Winner uid:{uid} update fail:", e)
 
-    # ❌ Losers
     for uid in losers:
         try:
             data = await get_score(uid) or get_default_tier()
@@ -937,26 +950,34 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             data["tier"] = validate_tier(data["tier"])
             data = adjust_score(data, -1)
             member = guild.get_member(uid)
-            data["username"] = member.display_name if member else "Unknown"
+            if member:
+                try:
+                    data["username"] = member.display_name
+                except Exception as e:
+                    print(f"⚠️ Cannot read nickname for {uid}: {e}")
+                    data["username"] = member.name
+            else:
+                data["username"] = "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
             await log_score_transaction(uid, -1, data["score"], data["tier"], "set_match_result")
             await update_player_stats(uid, is_win=False)
             loser_details.append({
-                "uid": uid, "username": data["username"],
+                "uid": uid,
+                "username": data["username"],
                 "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
-                "old_score": old_score, "new_score": data["score"],
-                "old_tier": old_tier, "new_tier": data["tier"]
+                "old_score": old_score,
+                "new_score": data["score"],
+                "old_tier": old_tier,
+                "new_tier": data["tier"]
             })
         except Exception as e:
             print(f"❌ Loser uid:{uid} update fail:", e)
 
-    # 🧠 Nickname шинэчлэлт
     try:
         await update_nicknames_for_users(guild, [p["uid"] for p in winner_details + loser_details])
     except Exception as e:
         print("⚠️ nickname update error:", e)
 
-    # 🧾 Match log
     try:
         await save_last_match(winners, losers)
         await insert_match(
@@ -975,7 +996,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
 
     GAME_SESSION["last_win_time"] = now
 
-    # 📋 Мессеж format
+    # 🧾 Message format
     win_str = ", ".join(f"{i+1}-р баг" for i in win_indexes)
     lose_str = ", ".join(f"{i+1}-р баг" for i in lose_indexes)
     lines = [f"🏆 {win_str} ялж {lose_str} ялагдлаа.\nОноо, Tier шинэчлэгдлээ."]
@@ -1083,7 +1104,14 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             data["tier"] = validate_tier(data["tier"])
             data = adjust_score(data, +2)
             member = guild.get_member(uid)
-            data["username"] = member.display_name if member else "Unknown"
+            if member:
+                try:
+                    data["username"] = member.display_name
+                except Exception as e:
+                    print(f"⚠️ Cannot read nickname for {uid}: {e}")
+                    data["username"] = member.name
+            else:
+                data["username"] = "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
             await log_score_transaction(uid, +2, data["score"], data["tier"], "fountain")
             await update_player_stats(uid, is_win=True)
@@ -1103,7 +1131,14 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             data["tier"] = validate_tier(data["tier"])
             data = adjust_score(data, -2)
             member = guild.get_member(uid)
-            data["username"] = member.display_name if member else "Unknown"
+            if member:
+                try:
+                    data["username"] = member.display_name
+                except Exception as e:
+                    print(f"⚠️ Cannot read nickname for {uid}: {e}")
+                    data["username"] = member.name
+            else:
+                data["username"] = "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
             await log_score_transaction(uid, -2, data["score"], data["tier"], "fountain")
             await update_player_stats(uid, is_win=False)
@@ -1296,7 +1331,14 @@ async def undo_last_match(interaction: discord.Interaction):
                 data["tier"] = demote_tier(data["tier"])
                 data["score"] = 0
             member = guild.get_member(uid)
-            data["username"] = member.display_name if member else "Unknown"
+            if member:
+                try:
+                    data["username"] = member.display_name
+                except Exception as e:
+                    print(f"⚠️ Cannot read nickname for {uid}: {e}")
+                    data["username"] = member.name
+            else:
+                data["username"] = "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
             await log_score_transaction(uid, delta, data["score"], data["tier"], reason="undo")
             changed_ids.append(uid)

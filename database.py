@@ -35,6 +35,10 @@ async def get_score(uid: int):
     return dict(row) if row else None
 
 async def upsert_score(uid: int, score: int, tier: str, username: str):
+    if not username:
+        existing = await get_score(uid)
+        username = existing.get("username", "Unknown") if existing else "Unknown"
+
     conn = await connect()
     await conn.execute("""
         INSERT INTO scores (uid, score, tier, username, updated_at)
@@ -43,6 +47,7 @@ async def upsert_score(uid: int, score: int, tier: str, username: str):
         SET score = $2, tier = $3, username = $4, updated_at = NOW()
     """, uid, score, tier, username)
     await conn.close()
+
 
 from datetime import datetime
 
