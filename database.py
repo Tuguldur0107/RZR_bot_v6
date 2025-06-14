@@ -169,3 +169,28 @@ async def get_player_stats(uid_list: list[int]):
     )
     await conn.close()
     return rows
+
+# 🧩 Tier system functions (async биш)
+
+def get_default_tier():
+    return {"score": 0, "tier": "4-1"}
+
+def promote_tier(tier: str) -> str:
+    order = [
+        "1-1", "1-2", "1-3",
+        "2-1", "2-2", "2-3",
+        "3-1", "3-2", "3-3",
+        "4-1", "4-2", "4-3"
+    ]
+    idx = order.index(tier) if tier in order else order.index("4-1")
+    return order[min(idx + 1, len(order) - 1)]
+
+def demote_tier(tier: str) -> str:
+    order = [
+        "1-1", "1-2", "1-3",
+        "2-1", "2-2", "2-3",
+        "3-1", "3-2", "3-3",
+        "4-1", "4-2", "4-3"
+    ]
+    idx = order.index(tier) if tier in order else order.index("4-1")
+    return order[max(idx - 1, 0)]
