@@ -150,9 +150,6 @@ async def save_session_state(data: dict, allow_empty=False):
     await conn.close()
     print("✅ session_state хадгалагдлаа.")
 
-
-
-
 async def load_session_state():
     try:
         conn = await connect()
@@ -168,6 +165,14 @@ async def load_session_state():
         print("❌ load_session_state алдаа:", e)
         return None
 
+async def clear_session_state():
+    try:
+        conn = await connect()
+        await conn.execute("DELETE FROM session_state")
+        await conn.close()
+        print("🧼 session_state DB цэвэрлэгдлээ")
+    except Exception as e:
+        print("❌ clear_session_state алдаа:", e)
 
 async def get_player_stats(uid_list: list[int]):
     if not uid_list:

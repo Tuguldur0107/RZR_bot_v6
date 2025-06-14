@@ -12,7 +12,8 @@ from database import connect
 from dotenv import load_dotenv
 import asyncpg
 from database import init_pool
-from database import pool  # энэ заавал байх ёстой
+from database import pool
+from database import clear_session_state
 from database import (
     # 🎯 Score & tier
     get_score, upsert_score, get_all_scores, get_default_tier,
@@ -315,35 +316,21 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
         return
 
     try:
-        # 🧹 DB session_state-г цэвэрлэнэ
-        try:
-            conn = await connect()
-            await conn.execute("DELETE FROM session_state")
-            await conn.close()
-            print("🧼 session_state DB цэвэрлэгдлээ")
-        except Exception as db_err:
-            print("❌ session_state цэвэрлэхэд алдаа:", db_err)
-            if not interaction.response.is_done():
-                await interaction.followup.send("❌ Session DB цэвэрлэх үед алдаа гарлаа.", ephemeral=True)
-            return
+        await clear_session_state()  # ✅ Зөвхөн цэвэрлэнэ
 
-        # 🟢 Шинэ session үүсгэнэ
+        # 🧠 Шинэ session RAM дотор эхлүүлнэ
         now = datetime.now(timezone.utc)
-        session = {
-            "active": True,
-            "start_time": now.isoformat(),
-            "last_win_time": now.isoformat(),
-            "initiator_id": interaction.user.id,
-            "team_count": team_count,
-            "players_per_team": players_per_team,
-            "player_ids": [],
-            "teams": [],
-            "changed_players": [],
-            "strategy": ""
-        }
+        GAME_SESSION["active"] = True
+        GAME_SESSION["start_time"] = now
+        GAME_SESSION["last_win_time"] = now
 
-        await save_session_state(session, allow_empty=True)
-        print("✅ session_state DB-д хадгаллаа")
+        TEAM_SETUP["initiator_id"] = interaction.user.id
+        TEAM_SETUP["team_count"] = team_count
+        TEAM_SETUP["players_per_team"] = players_per_team
+        TEAM_SETUP["player_ids"] = []
+        TEAM_SETUP["teams"] = []
+        TEAM_SETUP["changed_players"] = []
+        TEAM_SETUP["strategy"] = ""
 
         await interaction.followup.send(
             f"🟢 {team_count} багтай, {players_per_team} хүнтэй Session эхэллээ. `addme` коммандаар тоглогчид бүртгүүлнэ үү."
