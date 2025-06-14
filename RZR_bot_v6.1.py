@@ -497,6 +497,14 @@ async def set_match(interaction: discord.Interaction, team_number: int, mentions
     while len(TEAM_SETUP["teams"]) < team_number:
         TEAM_SETUP["teams"].append([])
 
+        # 🧠 team_count болон others тохиргоог баталгаажуулна
+    if "team_count" not in TEAM_SETUP or not TEAM_SETUP["team_count"]:
+        TEAM_SETUP["team_count"] = team_number
+    if "players_per_team" not in TEAM_SETUP or not TEAM_SETUP["players_per_team"]:
+        TEAM_SETUP["players_per_team"] = 5  # default
+    if "changed_players" not in TEAM_SETUP:
+        TEAM_SETUP["changed_players"] = []
+    
     TEAM_SETUP["teams"][team_number - 1] = user_ids
 
     # ✅ SQL-д хадгална
@@ -1330,18 +1338,6 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
 
         await upsert_score(uid, score, tier, data["username"])
         updated.append(uid)
-    # 🧠 Match-ийг бүртгэнэ
-    await insert_match(
-        timestamp=datetime.now(timezone.utc),
-        initiator_id=interaction.user.id,
-        team_count=0,
-        players_per_team=0,
-        winners=[uid for uid in user_ids if points > 0],
-        losers=[uid for uid in user_ids if points < 0],
-        mode="manual",
-        strategy="manual",
-        notes="add_score"
-    )
 
     try:
         await update_nicknames_for_users(interaction.guild, updated)
