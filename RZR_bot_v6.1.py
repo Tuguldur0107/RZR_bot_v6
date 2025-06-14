@@ -315,42 +315,29 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
         return
 
     try:
-        # 🧹 Хуучин session reset
-        GAME_SESSION["active"] = False
-        GAME_SESSION["start_time"] = None
-        GAME_SESSION["last_win_time"] = None
+        # 🧹 DB session_state-г цэвэрлэнэ
+        conn = await connect()
+        await conn.execute("DELETE FROM session_state")
+        await conn.close()
+        print("🧼 session_state DB цэвэрлэгдлээ")
 
         # 🟢 Шинэ session эхлүүлнэ
         now = datetime.now(timezone.utc)
-        GAME_SESSION["active"] = True
-        GAME_SESSION["start_time"] = now
-        GAME_SESSION["last_win_time"] = now
+        session = {
+            "active": True,
+            "start_time": now.isoformat(),
+            "last_win_time": now.isoformat(),
+            "initiator_id": interaction.user.id,
+            "team_count": team_count,
+            "players_per_team": players_per_team,
+            "player_ids": [],
+            "teams": [],
+            "changed_players": [],
+            "strategy": ""
+        }
 
-        TEAM_SETUP.clear()
-        TEAM_SETUP["team_count"] = team_count
-        TEAM_SETUP["players_per_team"] = players_per_team
-        TEAM_SETUP["player_ids"] = []
-        TEAM_SETUP["teams"] = []
-        TEAM_SETUP["changed_players"] = []
-        TEAM_SETUP["initiator_id"] = interaction.user.id
-
-        # 💾 SQL-д session хадгална
-        try:
-            await save_session_state({
-                "active": GAME_SESSION["active"],
-                "start_time": GAME_SESSION["start_time"].isoformat(),
-                "last_win_time": GAME_SESSION["last_win_time"].isoformat(),
-                "initiator_id": TEAM_SETUP["initiator_id"],
-                "team_count": TEAM_SETUP["team_count"],
-                "players_per_team": TEAM_SETUP["players_per_team"],
-                "player_ids": TEAM_SETUP["player_ids"],
-                "teams": TEAM_SETUP["teams"],
-                "changed_players": TEAM_SETUP["changed_players"],
-                "strategy": TEAM_SETUP.get("strategy", "")
-            })
-            print("✅ Session хадгалалт амжилттай")
-        except Exception as e:
-            print("❌ save_session_state алдаа:", e)
+        await save_session_state(session)
+        print("✅ session_state DB-д хадгаллаа")
 
         await interaction.followup.send(
             f"🟢 {team_count} багтай, {players_per_team} хүнтэй Session эхэллээ. `addme` коммандаар тоглогчид бүртгүүлнэ үү."
@@ -360,7 +347,6 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
         print("❌ start_match бүхэлдээ гацлаа:", e)
         await interaction.followup.send("⚠️ Session эхлүүлэхэд алдаа гарлаа.")
 
-
 @bot.tree.command(name="addme", description="Тоглогч өөрийгөө бүртгүүлнэ")
 async def addme(interaction: discord.Interaction):
     try:
@@ -369,40 +355,28 @@ async def addme(interaction: discord.Interaction):
         return
 
     try:
-        user_id = interaction.user.id
+        uid = interaction.user.id
 
-        if not GAME_SESSION["active"]:
-            await interaction.followup.send("⚠️ Одоогоор session эхлээгүй байна.")
+        session = await load_session_state()
+        if not session or not session.get("active"):
+            await interaction.followup.send("⚠️ Session идэвхгүй байна. `/start_match` эхлүүлнэ үү.")
             return
 
-        if user_id in TEAM_SETUP["player_ids"]:
+        if uid in session.get("player_ids", []):
             await interaction.followup.send("📌 Та аль хэдийн бүртгүүлсэн байна.")
             return
 
-        TEAM_SETUP["player_ids"].append(user_id)
+        # 🧠 Шинээр нэмнэ
+        session.setdefault("player_ids", []).append(uid)
 
-        try:
-            await save_session_state({
-                "active": GAME_SESSION["active"],
-                "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
-                "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
-                "initiator_id": TEAM_SETUP.get("initiator_id"),
-                "team_count": TEAM_SETUP.get("team_count"),
-                "players_per_team": TEAM_SETUP.get("players_per_team"),
-                "player_ids": TEAM_SETUP.get("player_ids"),
-                "teams": TEAM_SETUP.get("teams"),
-                "changed_players": TEAM_SETUP.get("changed_players")
-            })
-            print("✅ addme: session saved")
-        except Exception as e:
-            print("❌ addme: save_session_state алдаа:", e)
-
+        await save_session_state(session)
         await interaction.followup.send(
-            f"✅ {interaction.user.mention} бүртгүүллээ.\nНийт бүртгэгдсэн: {len(TEAM_SETUP['player_ids'])}"
+            f"✅ {interaction.user.mention} бүртгэгдлээ.\nНийт бүртгэгдсэн: {len(session['player_ids'])}"
         )
     except Exception as e:
-        print("❌ addme бүхэлдээ алдаа:", e)
+        print("❌ /addme бүхэлдээ алдаа:", e)
         await interaction.followup.send("⚠️ Бүртгэх үед алдаа гарлаа.")
+
 
 @bot.tree.command(name="show_added_players", description="Бүртгэгдсэн тоглогчдыг харуулна")
 async def show_added_players(interaction: discord.Interaction):
@@ -413,8 +387,8 @@ async def show_added_players(interaction: discord.Interaction):
 
     try:
         session = await load_session_state()
-        if not session:
-            await interaction.followup.send("⚠️ Session ачаалахад алдаа гарлаа.")
+        if not session or not session.get("active"):
+            await interaction.followup.send("⚠️ Session идэвхгүй байна.")
             return
 
         player_ids = session.get("player_ids", [])
@@ -427,21 +401,20 @@ async def show_added_players(interaction: discord.Interaction):
         for uid in player_ids:
             member = guild.get_member(uid)
             if member:
-                try:
-                    mentions.append(member.mention)
-                except Exception as e:
-                    print(f"⚠️ mention алдаа uid={uid}:", e)
+                mentions.append(member.mention)
 
         if not mentions:
             await interaction.followup.send("⚠️ Discord серверээс нэрсийг ачаалж чадсангүй.")
             return
 
-        text = "\n".join(mentions)
-        await interaction.followup.send(f"📋 Бүртгэгдсэн {len(mentions)} тоглогч:\n{text}")
+        await interaction.followup.send(
+            f"📋 Бүртгэгдсэн {len(mentions)} тоглогч:\n" + "\n".join(mentions)
+        )
 
     except Exception as e:
-        print("❌ show_added_players алдаа:", e)
+        print("❌ /show_added_players алдаа:", e)
         await interaction.followup.send("⚠️ Тоглогчдыг харуулах үед алдаа гарлаа.")
+
 
 @bot.tree.command(name="remove", description="Тоглогч өөрийгөө бүртгэлээс хасна")
 async def remove(interaction: discord.Interaction):
@@ -452,44 +425,31 @@ async def remove(interaction: discord.Interaction):
 
     try:
         user_id = interaction.user.id
-
-        if not GAME_SESSION["active"]:
+        session = await load_session_state()
+        if not session or not session.get("active"):
             await interaction.followup.send("⚠️ Session идэвхгүй байна.")
             return
 
-        if user_id not in TEAM_SETUP["player_ids"]:
+        player_ids = session.get("player_ids", [])
+        if user_id not in player_ids:
             await interaction.followup.send("❌ Та бүртгэлд байхгүй байна.")
             return
 
-        try:
-            TEAM_SETUP["player_ids"].remove(user_id)
-        except ValueError:
-            print("❌ remove: remove() үед алдаа гарлаа.")
-            await interaction.followup.send("⚠️ Та бүртгэлээс аль хэдийн хасагдсан байна.")
-            return
+        # 🗑 Хасах
+        player_ids.remove(user_id)
+        session["player_ids"] = player_ids
 
         try:
-            await save_session_state({
-                "active": GAME_SESSION["active"],
-                "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
-                "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
-                "initiator_id": TEAM_SETUP.get("initiator_id"),
-                "team_count": TEAM_SETUP.get("team_count"),
-                "players_per_team": TEAM_SETUP.get("players_per_team"),
-                "player_ids": TEAM_SETUP.get("player_ids"),
-                "teams": TEAM_SETUP.get("teams"),
-                "changed_players": TEAM_SETUP.get("changed_players")
-            })
+            await save_session_state(session)
         except Exception as e:
-            print("❌ save_session_state алдаа:", e)
+            print("❌ /remove: save_session_state алдаа:", e)
 
         await interaction.followup.send(
-            f"🗑 {interaction.user.mention} бүртгэлээс хасагдлаа.\nҮлдсэн: **{len(TEAM_SETUP['player_ids'])}** тоглогч"
+            f"🗑 {interaction.user.mention} бүртгэлээс хасагдлаа.\nҮлдсэн: **{len(player_ids)}** тоглогч"
         )
     except Exception as e:
         print("❌ /remove command бүхэлдээ алдаа:", e)
         await interaction.followup.send("⚠️ Хасах үед алдаа гарлаа.")
-
 @bot.tree.command(name="remove_user", description="Админ: тоглогчийг бүртгэлээс хасна")
 @app_commands.describe(mention="Хасах тоглогчийг mention хийнэ")
 async def remove_user(interaction: discord.Interaction, mention: str):
@@ -513,32 +473,28 @@ async def remove_user(interaction: discord.Interaction, mention: str):
         await interaction.followup.send("⚠️ Зөв mention хийгээгүй байна.")
         return
 
+    session = await load_session_state()
+    if not session or not session.get("active"):
+        await interaction.followup.send("⚠️ Session идэвхгүй байна.")
+        return
+
+    player_ids = session.get("player_ids", [])
     removed = 0
+
     for uid in user_ids:
-        try:
-            if uid in TEAM_SETUP["player_ids"]:
-                TEAM_SETUP["player_ids"].remove(uid)
-                removed += 1
-        except Exception as e:
-            print(f"❌ remove_user loop алдаа uid={uid}:", e)
+        if uid in player_ids:
+            player_ids.remove(uid)
+            removed += 1
+
+    session["player_ids"] = player_ids
 
     try:
-        await save_session_state({
-            "active": GAME_SESSION["active"],
-            "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
-            "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
-            "initiator_id": TEAM_SETUP.get("initiator_id"),
-            "team_count": TEAM_SETUP.get("team_count"),
-            "players_per_team": TEAM_SETUP.get("players_per_team"),
-            "player_ids": TEAM_SETUP.get("player_ids"),
-            "teams": TEAM_SETUP.get("teams"),
-            "changed_players": TEAM_SETUP.get("changed_players")
-        })
+        await save_session_state(session)
     except Exception as e:
         print("❌ save_session_state алдаа:", e)
 
     if removed == 0:
-        await interaction.followup.send("ℹ️ Бүртгэлээс хасагдсан тоглогч олдсонгүй.")
+        await interaction.followup.send("ℹ️ Хасагдсан тоглогч олдсонгүй.")
     else:
         await interaction.followup.send(f"🗑 {removed} тоглогч бүртгэлээс хасагдлаа.")
 
@@ -565,56 +521,42 @@ async def set_match(interaction: discord.Interaction, team_number: int, mentions
         await interaction.followup.send("⚠️ Хамгийн багадаа нэг тоглогч mention хийнэ үү.", ephemeral=True)
         return
 
-    # 🧠 Session идэвхгүй бол шинэчилнэ
-    if not GAME_SESSION["active"]:
-        now = datetime.now(timezone.utc)
-        GAME_SESSION["active"] = True
-        GAME_SESSION["start_time"] = now
-        GAME_SESSION["last_win_time"] = now
+    # 🧠 Session-г database-с уншина
+    session = await load_session_state() or {}
+    session.setdefault("teams", [])
+    session.setdefault("player_ids", [])
+    session.setdefault("changed_players", [])
+    session.setdefault("team_count", team_number)
+    session.setdefault("players_per_team", 5)
+    session.setdefault("initiator_id", interaction.user.id)
+    session["active"] = True
+    session["start_time"] = session.get("start_time") or datetime.now(timezone.utc).isoformat()
+    session["last_win_time"] = datetime.now(timezone.utc).isoformat()
 
-    # ⚠️ Давхардал шалгана
-    all_existing_ids = [uid for team in TEAM_SETUP.get("teams", []) for uid in team]
+    # 🔁 Багуудын тоонд хүргэж сунгана
+    while len(session["teams"]) < team_number:
+        session["teams"].append([])
+
+    # 🚫 Давхардал шалгана
+    all_existing_ids = [uid for team in session["teams"] for uid in team]
     duplicate_ids = [uid for uid in user_ids if uid in all_existing_ids]
     if duplicate_ids:
         await interaction.followup.send("🚫 Зарим тоглогч аль нэг багт бүртгэгдсэн байна.", ephemeral=True)
         return
 
-    # 🔧 teams[] байхгүй бол үүсгэнэ
-    while len(TEAM_SETUP.setdefault("teams", [])) < team_number:
-        TEAM_SETUP["teams"].append([])
-
-    TEAM_SETUP.setdefault("team_count", team_number)
-    TEAM_SETUP.setdefault("players_per_team", 5)
-    TEAM_SETUP.setdefault("changed_players", [])
-    TEAM_SETUP.setdefault("player_ids", [])
-    TEAM_SETUP.setdefault("initiator_id", interaction.user.id)
-
-    TEAM_SETUP["teams"][team_number - 1] = user_ids
-
-    # 📥 Багийн тоглогчдыг оноож, player_ids-д нэмнэ
-    TEAM_SETUP["teams"][team_number - 1] = user_ids
+    # ➕ Багт оноож, player_ids-д нэмнэ
+    session["teams"][team_number - 1] = user_ids
     for uid in user_ids:
-        if uid not in TEAM_SETUP["player_ids"]:
-            TEAM_SETUP["player_ids"].append(uid)
+        if uid not in session["player_ids"]:
+            session["player_ids"].append(uid)
 
-    # 💾 Session хадгалах
     try:
-        await save_session_state({
-            "active": GAME_SESSION["active"],
-            "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
-            "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
-            "initiator_id": TEAM_SETUP.get("initiator_id"),
-            "team_count": TEAM_SETUP.get("team_count"),
-            "players_per_team": TEAM_SETUP.get("players_per_team"),
-            "player_ids": TEAM_SETUP.get("player_ids"),
-            "teams": TEAM_SETUP.get("teams"),
-            "changed_players": TEAM_SETUP.get("changed_players")
-        })
+        await save_session_state(session)
     except Exception as e:
         print("❌ save_session_state алдаа:", e)
 
     await interaction.followup.send(f"✅ {len(user_ids)} тоглогчийг {team_number}-р багт бүртгэлээ.")
-    return
+
 
 @bot.tree.command(name="clear_match", description="Админ: одоогийн идэвхтэй match-ийн баг бүртгэлийг цэвэрлэнэ")
 async def clear_match(interaction: discord.Interaction):
@@ -670,20 +612,22 @@ async def go_bot(interaction: discord.Interaction):
     except discord.errors.InteractionResponded:
         return
 
+    # 🧠 Session-г SQL-с уншина
+    session = await load_session_state()
+    if not session or not session.get("active"):
+        await interaction.followup.send("⚠️ Session идэвхгүй байна.", ephemeral=True)
+        return
+
     is_admin = interaction.user.guild_permissions.administrator
-    is_initiator = interaction.user.id == TEAM_SETUP.get("initiator_id")
+    is_initiator = interaction.user.id == session.get("initiator_id")
     if not (is_admin or is_initiator):
         await interaction.followup.send("⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн ажиллуулж чадна.", ephemeral=True)
         return
 
-    if not GAME_SESSION["active"]:
-        await interaction.followup.send("⚠️ Session идэвхгүй байна.", ephemeral=True)
-        return
-
-    team_count = TEAM_SETUP.get("team_count")
-    players_per_team = TEAM_SETUP.get("players_per_team")
+    team_count = session.get("team_count")
+    players_per_team = session.get("players_per_team")
     total_slots = team_count * players_per_team
-    player_ids = TEAM_SETUP.get("player_ids", [])
+    player_ids = session.get("player_ids", [])
 
     if not player_ids:
         await interaction.followup.send("⚠️ Бүртгэгдсэн тоглогч алга байна.", ephemeral=True)
@@ -692,7 +636,7 @@ async def go_bot(interaction: discord.Interaction):
     # ✅ Оноо + tier-ийн жин тооцно
     player_weights = {}
     for uid in player_ids:
-        data = await get_score(uid) or get_default_tier()  # 🧩 ШИНЭ тоглогчдод default tier өгнө
+        data = await get_score(uid) or get_default_tier()
         player_weights[uid] = calculate_weight(data)
 
     sorted_players = sorted(player_weights.items(), key=lambda x: x[1], reverse=True)
@@ -700,7 +644,7 @@ async def go_bot(interaction: discord.Interaction):
     trimmed_weights = dict(trimmed_players)
     left_out_players = sorted_players[total_slots:]
 
-    # 🧠 Хуваарилалтын 3 хувилбар
+    # 🧠 3 хувилбар
     snake = snake_teams(trimmed_weights, team_count, players_per_team)
     greedy = greedy_teams(trimmed_weights, team_count, players_per_team)
     reflector = reflector_teams(trimmed_weights, team_count, players_per_team)
@@ -713,26 +657,15 @@ async def go_bot(interaction: discord.Interaction):
 
     strategy, (best_teams, best_diff) = min(strategy_diffs.items(), key=lambda x: x[1][1])
 
-    # 💾 Session хадгалах
-    TEAM_SETUP["teams"] = best_teams
-    TEAM_SETUP["strategy"] = strategy
-    GAME_SESSION["last_win_time"] = datetime.now(timezone.utc)
+    # ♻️ Session шинэчилж SQL-д хадгална
+    session["teams"] = best_teams
+    session["strategy"] = strategy
+    session["last_win_time"] = datetime.now(timezone.utc).isoformat()
 
     try:
-        await save_session_state({
-            "active": GAME_SESSION["active"],
-            "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
-            "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
-            "initiator_id": TEAM_SETUP.get("initiator_id"),
-            "team_count": TEAM_SETUP.get("team_count"),
-            "players_per_team": TEAM_SETUP.get("players_per_team"),
-            "player_ids": TEAM_SETUP.get("player_ids"),
-            "teams": TEAM_SETUP.get("teams"),
-            "changed_players": TEAM_SETUP.get("changed_players", []),
-            "strategy": strategy
-        })
+        await save_session_state(session)
     except Exception as e:
-        print("❌ save_session_state алдаа /go_bot:", e)
+        print("❌ go_bot: save_session_state алдаа:", e)
 
     # 📋 Харуулах формат
     guild = interaction.guild
@@ -763,26 +696,26 @@ async def go_bot(interaction: discord.Interaction):
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 async def go_gpt(interaction: discord.Interaction):
-    is_admin = interaction.user.guild_permissions.administrator
-    is_initiator = interaction.user.id == TEAM_SETUP.get("initiator_id")
-
-    if not (is_admin or is_initiator):
-        await interaction.response.send_message("❌ Зөвхөн admin эсвэл тохиргоог эхлүүлсэн хүн ажиллуулж чадна.", ephemeral=True)
-        return
-
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
 
-    if not GAME_SESSION["active"]:
+    session = await load_session_state()
+    if not session or not session.get("active"):
         await interaction.followup.send("⚠️ Session идэвхгүй байна.", ephemeral=True)
         return
 
-    team_count = TEAM_SETUP.get("team_count")
-    players_per_team = TEAM_SETUP.get("players_per_team")
+    is_admin = interaction.user.guild_permissions.administrator
+    is_initiator = interaction.user.id == session.get("initiator_id")
+    if not (is_admin or is_initiator):
+        await interaction.followup.send("❌ Зөвхөн admin эсвэл тохиргоог эхлүүлсэн хүн ажиллуулж чадна.", ephemeral=True)
+        return
+
+    team_count = session.get("team_count")
+    players_per_team = session.get("players_per_team")
     total_slots = team_count * players_per_team
-    player_ids = TEAM_SETUP.get("player_ids", [])
+    player_ids = session.get("player_ids", [])
 
     # ✅ Оноо + tier-ийн жин
     all_scores = []
@@ -806,44 +739,31 @@ async def go_gpt(interaction: discord.Interaction):
         )
         return
 
-    TEAM_SETUP["teams"] = teams
-    TEAM_SETUP["strategy"] = "gpt"
-    GAME_SESSION["last_win_time"] = datetime.now(timezone.utc)
+    # ♻️ Session-д хадгалах
+    session["teams"] = teams
+    session["strategy"] = "gpt"
+    session["last_win_time"] = datetime.now(timezone.utc).isoformat()
 
-    await save_session_state({
-        "active": GAME_SESSION["active"],
-        "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
-        "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
-        "initiator_id": TEAM_SETUP.get("initiator_id"),
-        "team_count": TEAM_SETUP.get("team_count"),
-        "players_per_team": TEAM_SETUP.get("players_per_team"),
-        "player_ids": TEAM_SETUP.get("player_ids"),
-        "teams": TEAM_SETUP.get("teams"),
-        "changed_players": TEAM_SETUP.get("changed_players", []),
-        "strategy": "gpt"
-    })
+    try:
+        await save_session_state(session)
+    except Exception as e:
+        print("❌ go_gpt: save_session_state алдаа:", e)
 
     # 📋 Message format
     guild = interaction.guild
     team_emojis = ["🥇", "🥈", "🥉", "🎯", "🔥", "🚀", "🎮", "🛡️", "⚔️", "🧠"]
-    used_ids = set(uid for team in teams for uid in team)
 
     lines = ["🤖 **ChatGPT-ээр тэнцвэржүүлсэн багууд:**"]
     for i, team in enumerate(teams):
         emoji = team_emojis[i % len(team_emojis)]
         team_total = sum(score_map.get(uid, 0) for uid in team)
         leader_uid = max(team, key=lambda uid: score_map.get(uid, 0))
-        leader_name = guild.get_member(leader_uid).display_name if guild.get_member(leader_uid) else str(leader_uid)
-
         lines.append(f"\n{emoji} **#{i+1}-р баг** (нийт оноо: {team_total}) 😎\n")
         for uid in team:
             member = guild.get_member(uid)
             name = member.display_name if member else f"{uid}"
             weight = score_map.get(uid, 0)
-            if uid == leader_uid:
-                lines.append(f"{name} ({weight}) 😎 Team Leader\n")
-            else:
-                lines.append(f"{name} ({weight})\n")
+            lines.append(f"{name} ({weight})" + (" 😎 Team Leader\n" if uid == leader_uid else "\n"))
 
     if left_out_players:
         mentions = "\n• ".join(f"<@{p['id']}>" for p in left_out_players)
@@ -851,7 +771,6 @@ async def go_gpt(interaction: discord.Interaction):
 
     await interaction.followup.send("".join(lines))
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
-
 
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -864,180 +783,66 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     except discord.errors.InteractionResponded:
         return
 
-    if not (TEAM_SETUP.get("players_per_team") in [4, 5] and TEAM_SETUP.get("team_count", 0) >= 2):
-        await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
-        return
-
-    if not GAME_SESSION["active"] or not TEAM_SETUP.get("teams"):
-        await interaction.followup.send("⚠️ Session идэвхгүй эсвэл багууд бүрдээгүй байна.")
+    session = await load_session_state()
+    if not session or not session.get("teams"):
+        await interaction.followup.send("⚠️ Session бүртгэл эсвэл багийн мэдээлэл алга байна.")
         return
 
     is_admin = interaction.user.guild_permissions.administrator
-    is_initiator = interaction.user.id == TEAM_SETUP.get("initiator_id")
+    is_initiator = interaction.user.id == session.get("initiator_id")
     if not (is_admin or is_initiator):
-        await interaction.followup.send("⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн ажиллуулж чадна.")
+        await interaction.followup.send("❌ Зөвхөн admin эсвэл session эхлүүлсэн хүн хэрэглэнэ.", ephemeral=True)
+        return
+
+    players_per_team = session.get("players_per_team")
+    team_count = session.get("team_count")
+    teams = session.get("teams")
+
+    if not (players_per_team in [4, 5] and team_count >= 2):
+        await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
         return
 
     try:
-        win_indexes = [int(x.strip()) - 1 for x in winner_teams.strip().split()]
-        lose_indexes = [int(x.strip()) - 1 for x in loser_teams.strip().split()]
-    except ValueError:
-        await interaction.followup.send("⚠️ Багийн дугааруудыг зөв оруулна уу (ж: 1 3)")
+        winners = [int(x) for x in winner_teams.split()]
+        losers = [int(x) for x in loser_teams.split()]
+    except:
+        await interaction.followup.send("⚠️ Багийн дугааруудыг зөв оруулна уу (ж: 1 2).")
         return
 
-    all_teams = TEAM_SETUP["teams"]
-    if any(i < 0 or i >= len(all_teams) for i in win_indexes + lose_indexes):
-        await interaction.followup.send("⚠️ Багийн дугаар буруу байна.")
-        return
+    affected_players = []
+    for team_idx, team in enumerate(teams):
+        if (team_idx + 1) in winners:
+            point = 1
+        elif (team_idx + 1) in losers:
+            point = -1
+        else:
+            continue
 
-    winners = [uid for i in win_indexes for uid in all_teams[i]]
-    losers = [uid for i in lose_indexes for uid in all_teams[i]]
-    now = datetime.now(timezone.utc)
-    guild = interaction.guild
+        for uid in team:
+            user_data = await get_score(uid) or get_default_tier()
+            old_score = user_data["score"]
+            old_tier = user_data["tier"]
 
-    def validate_tier(tier): return tier if tier in TIER_ORDER else "4-1"
+            new_score = old_score + point
+            new_tier = old_tier
 
-    def adjust_score(data, delta):
-        data["score"] += delta
-        if data["score"] >= 5:
-            idx = TIER_ORDER.index(data["tier"])
-            if idx + 1 < len(TIER_ORDER):
-                data["tier"] = TIER_ORDER[idx + 1]
-            data["score"] = 0
-        elif data["score"] <= -5:
-            idx = TIER_ORDER.index(data["tier"])
-            if idx - 1 >= 0:
-                data["tier"] = TIER_ORDER[idx - 1]
-            data["score"] = 0
-        return data
+            if new_score >= 5:
+                new_tier = promote_tier(old_tier)
+                new_score = 0
+            elif new_score <= -5:
+                new_tier = demote_tier(old_tier)
+                new_score = 0
 
-    winner_details, loser_details = [], []
+            await upsert_score(uid, new_score, new_tier, interaction.guild.get_member(uid).display_name or "Unknown")
+            affected_players.append((uid, old_score, old_tier, new_score, new_tier))
 
-    for uid in winners:
-        try:
-            data = await get_score(uid) or get_default_tier()
-            old_score, old_tier = data["score"], data["tier"]
-            data["tier"] = validate_tier(data["tier"])
-            data = adjust_score(data, +1)
-            member = guild.get_member(uid)
-            if member:
-                try:
-                    data["username"] = member.display_name
-                except Exception as e:
-                    print(f"⚠️ Cannot read nickname for {uid}: {e}")
-                    data["username"] = member.name
-            else:
-                data["username"] = "Unknown"
-            await upsert_score(uid, data["score"], data["tier"], data["username"])
-            await log_score_transaction(uid, +1, data["score"], data["tier"], "set_match_result")
-            await update_player_stats(uid, is_win=True)
-            winner_details.append({
-                "uid": uid,
-                "username": data["username"],
-                "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
-                "old_score": old_score,
-                "new_score": data["score"],
-                "old_tier": old_tier,
-                "new_tier": data["tier"]
-            })
-        except Exception as e:
-            print(f"❌ Winner uid:{uid} update fail:", e)
+    lines = ["📊 Match үр дүн:\n"]
+    for uid, oscore, otier, nscore, ntier in affected_players:
+        name = interaction.guild.get_member(uid).display_name if interaction.guild.get_member(uid) else str(uid)
+        tier_change = " ⬆️" if ntier != otier and TIER_ORDER.index(ntier) < TIER_ORDER.index(otier) else (" ⬇️" if ntier != otier else "")
+        lines.append(f"{name}: {otier}({oscore}) → {ntier}({nscore}){tier_change}")
 
-    for uid in losers:
-        try:
-            data = await get_score(uid) or get_default_tier()
-            old_score, old_tier = data["score"], data["tier"]
-            data["tier"] = validate_tier(data["tier"])
-            data = adjust_score(data, -1)
-            member = guild.get_member(uid)
-            if member:
-                try:
-                    data["username"] = member.display_name
-                except Exception as e:
-                    print(f"⚠️ Cannot read nickname for {uid}: {e}")
-                    data["username"] = member.name
-            else:
-                data["username"] = "Unknown"
-            await upsert_score(uid, data["score"], data["tier"], data["username"])
-            await log_score_transaction(uid, -1, data["score"], data["tier"], "set_match_result")
-            await update_player_stats(uid, is_win=False)
-            loser_details.append({
-                "uid": uid,
-                "username": data["username"],
-                "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
-                "old_score": old_score,
-                "new_score": data["score"],
-                "old_tier": old_tier,
-                "new_tier": data["tier"]
-            })
-        except Exception as e:
-            print(f"❌ Loser uid:{uid} update fail:", e)
-
-    try:
-        await update_nicknames_for_users(guild, [p["uid"] for p in winner_details + loser_details])
-    except Exception as e:
-        print("⚠️ nickname update error:", e)
-
-    try:
-        await save_last_match(winners, losers)
-        await insert_match(
-            timestamp=now,
-            initiator_id=TEAM_SETUP.get("initiator_id", 0),
-            team_count=TEAM_SETUP.get("team_count", 2),
-            players_per_team=TEAM_SETUP.get("players_per_team", 5),
-            winners=winners,
-            losers=losers,
-            mode="manual",
-            strategy="NormalMatch",
-            notes="set_match_result"
-        )
-    except Exception as e:
-        print("❌ Match log алдаа:", e)
-
-    GAME_SESSION["last_win_time"] = now
-
-    # 🧾 Message format
-    win_str = ", ".join(f"{i+1}-р баг" for i in win_indexes)
-    lose_str = ", ".join(f"{i+1}-р баг" for i in lose_indexes)
-    lines = [f"🏆 {win_str} ялж {lose_str} ялагдлаа.\nОноо, Tier шинэчлэгдлээ."]
-
-    if winner_details:
-        lines.append("\n✅ Ялсан тоглогчид:")
-        for p in winner_details:
-            old_i = TIER_ORDER.index(p["old_tier"])
-            new_i = TIER_ORDER.index(p["new_tier"])
-            change = " ⬆" if new_i > old_i else (" ⬇" if new_i < old_i else "")
-            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
-
-    if loser_details:
-        lines.append("\n💀 Ялагдсан тоглогчид:")
-        for p in loser_details:
-            old_i = TIER_ORDER.index(p["old_tier"])
-            new_i = TIER_ORDER.index(p["new_tier"])
-            change = " ⬆" if new_i > old_i else (" ⬇" if new_i < old_i else "")
-            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
-
-    try:
-        await interaction.followup.send("\n".join(lines) + "\n✅ Match бүртгэгдлээ.")
-    except Exception as e:
-        print("❌ followup send алдаа:", e)
-
-    try:
-        await save_session_state({
-            "active": GAME_SESSION["active"],
-            "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
-            "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
-            "initiator_id": TEAM_SETUP.get("initiator_id"),
-            "team_count": TEAM_SETUP.get("team_count"),
-            "players_per_team": TEAM_SETUP.get("players_per_team"),
-            "player_ids": TEAM_SETUP.get("player_ids"),
-            "teams": TEAM_SETUP.get("teams"),
-            "changed_players": TEAM_SETUP.get("changed_players", []),
-            "strategy": TEAM_SETUP.get("strategy", "")
-        })
-    except Exception as e:
-        print("❌ session save алдаа:", e)
-
+    await interaction.followup.send("\n".join(lines))
 
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -1050,16 +855,18 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
     except discord.errors.InteractionResponded:
         return
 
-    if not (TEAM_SETUP.get("players_per_team") in [4, 5] and TEAM_SETUP.get("team_count", 0) >= 2):
+    session = await load_session_state() or {}
+
+    if not (session.get("players_per_team") in [4, 5] and session.get("team_count", 0) >= 2):
         await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
         return
 
-    if not GAME_SESSION["active"] or not TEAM_SETUP.get("teams"):
+    if not session.get("active") or not session.get("teams"):
         await interaction.followup.send("⚠️ Session идэвхгүй эсвэл багууд бүрдээгүй байна.")
         return
 
     is_admin = interaction.user.guild_permissions.administrator
-    is_initiator = interaction.user.id == TEAM_SETUP.get("initiator_id")
+    is_initiator = interaction.user.id == session.get("initiator_id")
     if not (is_admin or is_initiator):
         await interaction.followup.send("⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн ажиллуулж чадна.")
         return
@@ -1071,7 +878,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         await interaction.followup.send("⚠️ Багийн дугааруудыг зөв оруулна уу (ж: 1 3)")
         return
 
-    all_teams = TEAM_SETUP["teams"]
+    all_teams = session["teams"]
     if any(i < 0 or i >= len(all_teams) for i in win_indexes + lose_indexes):
         await interaction.followup.send("⚠️ Багийн дугаар буруу байна.")
         return
@@ -1104,14 +911,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             data["tier"] = validate_tier(data["tier"])
             data = adjust_score(data, +2)
             member = guild.get_member(uid)
-            if member:
-                try:
-                    data["username"] = member.display_name
-                except Exception as e:
-                    print(f"⚠️ Cannot read nickname for {uid}: {e}")
-                    data["username"] = member.name
-            else:
-                data["username"] = "Unknown"
+            data["username"] = member.display_name if member else "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
             await log_score_transaction(uid, +2, data["score"], data["tier"], "fountain")
             await update_player_stats(uid, is_win=True)
@@ -1131,14 +931,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             data["tier"] = validate_tier(data["tier"])
             data = adjust_score(data, -2)
             member = guild.get_member(uid)
-            if member:
-                try:
-                    data["username"] = member.display_name
-                except Exception as e:
-                    print(f"⚠️ Cannot read nickname for {uid}: {e}")
-                    data["username"] = member.name
-            else:
-                data["username"] = "Unknown"
+            data["username"] = member.display_name if member else "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
             await log_score_transaction(uid, -2, data["score"], data["tier"], "fountain")
             await update_player_stats(uid, is_win=False)
@@ -1151,20 +944,18 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         except Exception as e:
             print(f"❌ Loser uid:{uid} update fail:", e)
 
-    # 🧠 Nickname шинэчлэлт
     try:
         await update_nicknames_for_users(guild, [p["uid"] for p in winner_details + loser_details])
     except Exception as e:
         print("⚠️ nickname update error:", e)
 
-    # 🧾 Match log
     try:
         await save_last_match(winners, losers)
         await insert_match(
             timestamp=now,
-            initiator_id=TEAM_SETUP.get("initiator_id", 0),
-            team_count=TEAM_SETUP.get("team_count", 2),
-            players_per_team=TEAM_SETUP.get("players_per_team", 5),
+            initiator_id=session.get("initiator_id", 0),
+            team_count=session.get("team_count", 2),
+            players_per_team=session.get("players_per_team", 5),
             winners=winners,
             losers=losers,
             mode="manual",
@@ -1174,9 +965,8 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
     except Exception as e:
         print("❌ Match log алдаа:", e)
 
-    GAME_SESSION["last_win_time"] = now
+    session["last_win_time"] = now.isoformat()
 
-    # 📋 Мессеж format
     win_str = ", ".join(f"{i+1}-р баг" for i in win_indexes)
     lose_str = ", ".join(f"{i+1}-р баг" for i in lose_indexes)
     lines = [f"💦 {win_str} Fountain ялж {lose_str} ялагдлаа.\nОноо, Tier шинэчлэгдлээ."]
@@ -1203,18 +993,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         print("❌ followup send алдаа:", e)
 
     try:
-        await save_session_state({
-            "active": GAME_SESSION["active"],
-            "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
-            "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
-            "initiator_id": TEAM_SETUP.get("initiator_id"),
-            "team_count": TEAM_SETUP.get("team_count"),
-            "players_per_team": TEAM_SETUP.get("players_per_team"),
-            "player_ids": TEAM_SETUP.get("player_ids"),
-            "teams": TEAM_SETUP.get("teams"),
-            "changed_players": TEAM_SETUP.get("changed_players", []),
-            "strategy": TEAM_SETUP.get("strategy", "")
-        })
+        await save_session_state(session)
     except Exception as e:
         print("❌ session save алдаа:", e)
 
@@ -1230,23 +1009,24 @@ async def change_player(interaction: discord.Interaction, from_user: discord.Mem
     except discord.errors.InteractionResponded:
         return
 
-    if not GAME_SESSION["active"] or not TEAM_SETUP.get("teams"):
+    session = await load_session_state() or {}
+
+    if not session.get("active") or not session.get("teams"):
         await interaction.followup.send("⚠️ Session идэвхгүй эсвэл баг бүрдээгүй байна.", ephemeral=True)
         return
 
     is_admin = interaction.user.guild_permissions.administrator
-    is_initiator = interaction.user.id == TEAM_SETUP.get("initiator_id")
+    is_initiator = interaction.user.id == session.get("initiator_id")
     if not (is_admin or is_initiator):
         await interaction.followup.send("⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн сольж чадна.", ephemeral=True)
         return
 
     from_uid = from_user.id
     to_uid = to_user.id
-    teams = TEAM_SETUP["teams"]
+    teams = session["teams"]
 
     from_team_index = None
 
-    # 🔎 from_user-г баг дотроос олох
     for i, team in enumerate(teams):
         if from_uid in team:
             from_team_index = i
@@ -1265,31 +1045,21 @@ async def change_player(interaction: discord.Interaction, from_user: discord.Mem
     # ✅ from_user байсан багт to_user-г оруулна
     teams[from_team_index].append(to_uid)
 
-    # 🔁 Солигдсон гишүүдийг тэмдэглэнэ
-    changed = TEAM_SETUP.get("changed_players", [])
+    changed = session.get("changed_players", [])
     if from_uid not in changed:
         changed.append(from_uid)
     if to_uid not in changed:
         changed.append(to_uid)
-    TEAM_SETUP["changed_players"] = changed
+    session["changed_players"] = changed
 
-    # 💾 SQL-д хадгалах
-    await save_session_state({
-        "active": GAME_SESSION["active"],
-        "start_time": GAME_SESSION["start_time"].isoformat() if GAME_SESSION["start_time"] else None,
-        "last_win_time": GAME_SESSION["last_win_time"].isoformat() if GAME_SESSION["last_win_time"] else None,
-        "initiator_id": TEAM_SETUP.get("initiator_id"),
-        "team_count": TEAM_SETUP.get("team_count"),
-        "players_per_team": TEAM_SETUP.get("players_per_team"),
-        "player_ids": TEAM_SETUP.get("player_ids"),
-        "teams": TEAM_SETUP.get("teams"),
-        "changed_players": TEAM_SETUP["changed_players"],
-        "strategy": TEAM_SETUP.get("strategy", "")
-    })
+    try:
+        await save_session_state(session)
+    except Exception as e:
+        print("❌ change_player: save_session_state алдаа:", e)
 
     await interaction.followup.send(
         f"🔁 **{from_user.display_name}** багaa орхиж **{to_user.display_name}** орлоо!\n"
-        f"📌 {from_team_index+1}-р багт солигдолт хийгдсэн."
+        f"📌 {from_team_index + 1}-р багт солигдолт хийгдсэн."
     )
 
 @bot.tree.command(name="undo_last_match", description="Сүүлд хийсэн match-ийн оноог буцаана")
@@ -1347,15 +1117,11 @@ async def undo_last_match(interaction: discord.Interaction):
 
     for uid in winners:
         await process_user(uid, -1)
+        await update_player_stats(uid, is_win=True, undo=True)
+
     for uid in losers:
         await process_user(uid, +1)
-
-    # 📉 Win/Loss буцаах
-    try:
-        await update_player_stats(winners, is_win=True, undo=True)
-        await update_player_stats(losers, is_win=False, undo=True)
-    except Exception as e:
-        print("⚠️ player_stats undo алдаа:", e)
+        await update_player_stats(uid, is_win=False, undo=True)
 
     try:
         await save_last_match([], [])  # 🧹 clear
@@ -1376,6 +1142,7 @@ async def undo_last_match(interaction: discord.Interaction):
         f"💀 Loser-ууд: {lose_mentions}"
     )
     await interaction.followup.send("✅ Match бүртгэл цэвэрлэгдлээ.")
+
 
 @bot.tree.command(name="my_score", description="Таны оноо болон tier-г харуулна")
 async def my_score(interaction: discord.Interaction):
@@ -1667,11 +1434,13 @@ async def current_match(interaction: discord.Interaction):
     except discord.errors.InteractionResponded:
         return
 
-    if not GAME_SESSION["active"]:
+    session = await load_session_state()
+    if not session or not session.get("active"):
         await interaction.followup.send("⚠️ Session идэвхгүй байна.")
         return
 
-    if not TEAM_SETUP.get("teams") or not any(TEAM_SETUP["teams"]):
+    teams = session.get("teams", [])
+    if not teams or not any(teams):
         await interaction.followup.send("📭 Багууд хараахан хуваарилагдаагүй байна.")
         return
 
@@ -1679,9 +1448,9 @@ async def current_match(interaction: discord.Interaction):
     guild = interaction.guild
     msg_lines = []
 
-    for i, team in enumerate(TEAM_SETUP["teams"], start=1):
+    for i, team in enumerate(teams, start=1):
         total_score = sum(tier_score(all_scores.get(str(uid), {})) for uid in team)
-        msg_lines.append(f"**🏅 Team {i}** (нийт оноо: `{total_score}`):")
+        msg_lines.append(f"**🏅 {i}-р баг** (нийт оноо: `{total_score}`):")
 
         for uid in team:
             data = all_scores.get(str(uid), {})
@@ -1694,6 +1463,8 @@ async def current_match(interaction: discord.Interaction):
         msg_lines.append("")  # newline
 
     await interaction.followup.send("\n".join(msg_lines))
+
+
 
 @bot.tree.command(name="leaderboard", description="Топ 10 тоглогчийн оноо, win/loss, winrate харуулна")
 async def leaderboard(interaction: discord.Interaction):
