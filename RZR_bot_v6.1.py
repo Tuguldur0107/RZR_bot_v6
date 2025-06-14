@@ -342,7 +342,7 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
             "strategy": ""
         }
 
-        await save_session_state(session)
+        await save_session_state(session, allow_empty=True)
         print("✅ session_state DB-д хадгаллаа")
 
         await interaction.followup.send(
