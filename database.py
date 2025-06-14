@@ -138,9 +138,10 @@ async def upsert_shield(uid: int, shields: int):
     await conn.close()
 
 # 🧠 Session state
-async def save_session_state(data: dict):
+async def save_session_state(data: dict, allow_empty=False):
     print("🧠 save_session_state дуудаж байна:", data)
-    if not data.get("player_ids"):
+    
+    if not data.get("player_ids") and not allow_empty:
         print("⚠️ player_ids байхгүй тул хадгалахгүй.")
         raise ValueError("⚠️ Session-д player_ids байхгүй тул хадгалахгүй.")
 
@@ -148,6 +149,7 @@ async def save_session_state(data: dict):
     await conn.execute("INSERT INTO session_state (timestamp, data) VALUES ($1, $2)", datetime.now(), data)
     await conn.close()
     print("✅ session_state хадгалагдлаа.")
+
 
 
 
