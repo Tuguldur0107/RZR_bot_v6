@@ -1686,14 +1686,23 @@ async def match_history(interaction: discord.Interaction):
 
     await interaction.followup.send("\n".join(lines))
 
-@bot.tree.command(name="resync", description="Коммандуудыг дахин sync хийнэ (admin only)")
+@bot.tree.command(name="resync", description="Slash командуудыг дахин бүртгэнэ (админ)")
 async def resync(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("⛔️ Админ хэрэглэгч байх шаардлагатай.", ephemeral=True)
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.errors.InteractionResponded:
         return
 
-    await bot.tree.sync()
-    await interaction.response.send_message("🔄 Коммандууд амжилттай sync хийгдлээ.", ephemeral=True)
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.followup.send("⛔️ Зөвхөн админ ашиглана.", ephemeral=True)
+        return
+
+    try:
+        synced = await bot.tree.sync(guild=interaction.guild)
+        await interaction.followup.send(f"✅ {len(synced)} команд амжилттай дахин бүртгэгдлээ.", ephemeral=True)
+    except Exception as e:
+        print("❌ resync алдаа:", e)
+        await interaction.followup.send("⚠️ Комманд sync хийх үед алдаа гарлаа.", ephemeral=True)
 
 # 🎯 Run
 async def main():

@@ -143,10 +143,20 @@ async def save_session_state(data: dict):
     await conn.close()
 
 async def load_session_state():
-    conn = await connect()
-    row = await conn.fetchrow("SELECT data FROM session_state ORDER BY timestamp DESC LIMIT 1")
-    await conn.close()
-    return row["data"] if row else None
+    try:
+        conn = await connect()
+        row = await conn.fetchrow("SELECT data FROM session_state ORDER BY timestamp DESC LIMIT 1")
+        await conn.close()
+        if row and "data" in row:
+            print("📥 session_state loaded:", row["data"])
+            return row["data"]
+        else:
+            print("⚠️ session_state хоосон байна")
+            return None
+    except Exception as e:
+        print("❌ load_session_state алдаа:", e)
+        return None
+
 
 async def get_player_stats(uid_list: list[int]):
     if not uid_list:
