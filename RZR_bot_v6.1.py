@@ -306,68 +306,53 @@ async def on_ready():
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message("🏓 Pong!")
 
-@bot.tree.command(name="set_match", description="Админ: гараар баг бүрдүүлнэ")
-@app_commands.describe(team_number="Багийн дугаар", mentions="Тоглогчдыг mention хийнэ")
-async def set_match(interaction: discord.Interaction, team_number: int, mentions: str):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэнэ.", ephemeral=True)
-        return
-
+@bot.tree.command(name="start_match", description="Session эхлүүлнэ, багийн тоо болон тоглогчийн тоог тохируулна")
+@app_commands.describe(team_count="Хэдэн багтай байх вэ", players_per_team="Нэг багт хэдэн хүн байх вэ")
+async def start_match(interaction: discord.Interaction, team_count: int, players_per_team: int):
     try:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
 
     try:
-        user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
-    except Exception as e:
-        print("❌ mention parse алдаа:", e)
-        await interaction.followup.send("⚠️ Mention parse хийхэд алдаа гарлаа.", ephemeral=True)
-        return
+        # 🧹 DB session_state-г цэвэрлэнэ
+        try:
+            conn = await connect()
+            await conn.execute("DELETE FROM session_state")
+            await conn.close()
+            print("🧼 session_state DB цэвэрлэгдлээ")
+        except Exception as db_err:
+            print("❌ session_state цэвэрлэхэд алдаа:", db_err)
+            if not interaction.response.is_done():
+                await interaction.followup.send("❌ Session DB цэвэрлэх үед алдаа гарлаа.", ephemeral=True)
+            return
 
-    if not user_ids:
-        await interaction.followup.send("⚠️ Хамгийн багадаа нэг тоглогч mention хийнэ үү.", ephemeral=True)
-        return
+        # 🟢 Шинэ session үүсгэнэ
+        now = datetime.now(timezone.utc)
+        session = {
+            "active": True,
+            "start_time": now.isoformat(),
+            "last_win_time": now.isoformat(),
+            "initiator_id": interaction.user.id,
+            "team_count": team_count,
+            "players_per_team": players_per_team,
+            "player_ids": [],
+            "teams": [],
+            "changed_players": [],
+            "strategy": ""
+        }
 
-    # 🧠 Session-г database-с уншина
-    session = await load_session_state() or {}
-    session.setdefault("teams", [])
-    session.setdefault("player_ids", [])
-    session.setdefault("changed_players", [])
-    session.setdefault("team_count", team_number)
-    session.setdefault("players_per_team", 5)
-    session.setdefault("initiator_id", interaction.user.id)
-    session["active"] = True
-    session["start_time"] = session.get("start_time") or datetime.now(timezone.utc).isoformat()
-    session["last_win_time"] = datetime.now(timezone.utc).isoformat()
-
-    # 🔁 Багуудын тоонд хүргэж сунгана
-    while len(session["teams"]) < team_number:
-        session["teams"].append([])
-
-    # 🚫 Давхардал шалгана
-    all_existing_ids = [uid for team in session["teams"] for uid in team]
-    duplicate_ids = [uid for uid in user_ids if uid in all_existing_ids]
-    if duplicate_ids:
-        await interaction.followup.send("🚫 Зарим тоглогч аль нэг багт бүртгэгдсэн байна.", ephemeral=True)
-        return
-
-    # ➕ Багт оноож, player_ids-д нэмнэ
-    session["teams"][team_number - 1] = user_ids
-    for uid in user_ids:
-        if uid not in session["player_ids"]:
-            session["player_ids"].append(uid)
-
-    # 💾 Session хадгална
-    try:
         await save_session_state(session)
+        print("✅ session_state DB-д хадгаллаа")
+
+        await interaction.followup.send(
+            f"🟢 {team_count} багтай, {players_per_team} хүнтэй Session эхэллээ. `addme` коммандаар тоглогчид бүртгүүлнэ үү."
+        )
+
     except Exception as e:
-        print("❌ save_session_state алдаа:", e)
-        await interaction.followup.send("❌ Session хадгалах үед алдаа гарлаа.", ephemeral=True)
-        return
-
-    await interaction.followup.send(f"✅ {len(user_ids)} тоглогчийг {team_number}-р багт бүртгэлээ.")
-
+        print("❌ start_match бүхэлдээ гацлаа:", e)
+        if not interaction.response.is_done():
+            await interaction.followup.send("⚠️ Session эхлүүлэхэд алдаа гарлаа.", ephemeral=True)
 
 @bot.tree.command(name="addme", description="Тоглогч өөрийгөө бүртгүүлнэ")
 async def addme(interaction: discord.Interaction):
@@ -860,7 +845,6 @@ async def go_gpt(interaction: discord.Interaction):
     await interaction.followup.send("".join(lines))
     await interaction.followup.send("✅ Match бүртгэгдлээ.")
 
-
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
 @app_commands.describe(
     winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)",
@@ -1046,7 +1030,6 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     except Exception as e:
         print("❌ session save алдаа:", e)
 
-
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
     winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)",
@@ -1225,7 +1208,6 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         })
     except Exception as e:
         print("❌ session save алдаа:", e)
-
 
 @bot.tree.command(name="change_player", description="Багийн гишүүдийг солих")
 @app_commands.describe(
