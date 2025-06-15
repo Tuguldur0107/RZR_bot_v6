@@ -49,7 +49,6 @@ async def upsert_score(uid: int, score: int, tier: str, username: str):
     """, uid, score, tier, username)
     await conn.close()
 
-
 from datetime import datetime
 
 # 🧾 Онооны өөрчлөлт бүрийг score_log руу хадгалах
@@ -161,9 +160,12 @@ async def save_session_state(data: dict, allow_empty=False):
         INSERT INTO session_state (
             active, start_time, last_win_time, initiator_id,
             team_count, players_per_team, player_ids,
-            teams, strategy, timestamp
+            teams, changed_players, strategy, timestamp
+        ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7,
+            $8, $9, $10, $11
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     """,
         data.get("active", False),
         data.get("start_time"),
@@ -173,11 +175,13 @@ async def save_session_state(data: dict, allow_empty=False):
         data.get("players_per_team", 0),
         json.dumps(data.get("player_ids", [])),
         json.dumps(data.get("teams", [])),
+        json.dumps(data.get("changed_players", [])),
         data.get("strategy", "unknown"),
         datetime.now()
     )
     await conn.close()
     print("✅ session_state хадгалагдлаа.")
+
 
 
 async def load_session_state():
