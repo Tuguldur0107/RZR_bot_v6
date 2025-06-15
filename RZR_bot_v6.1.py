@@ -149,14 +149,14 @@ def tier_score(data: dict) -> int:
 def promote_tier(tier):  # Сайжрах → index -1
     try:
         i = TIER_ORDER.index(tier)
-        return TIER_ORDER[max(i - 1, 0)]
+        return TIER_ORDER[max(i + 1, 0)]
     except:
         return tier
 
 def demote_tier(tier):  # Дордох → index +1
     try:
         i = TIER_ORDER.index(tier)
-        return TIER_ORDER[min(i + 1, len(TIER_ORDER) - 1)]
+        return TIER_ORDER[min(i - 1, len(TIER_ORDER) - 1)]
     except:
         return tier
 
@@ -340,7 +340,6 @@ async def on_ready():
     # 🕓 Timeout шалгагчийг эхлүүлнэ
     asyncio.create_task(session_timeout_checker())
 
-
 async def initialize_bot():
     try:
         await init_pool()
@@ -353,7 +352,6 @@ async def initialize_bot():
         print("📥 Session state амжилттай ачаалагдлаа.")
     except Exception as e:
         print("❌ Session ачаалах үед алдаа гарлаа:", e)
-
 
 # 🧩 Command: ping
 @bot.tree.command(name="ping", description="Bot-ийн latency-г шалгана")
@@ -934,14 +932,10 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     def adjust_score(data, delta):
         data["score"] += delta
         if data["score"] >= 5:
-            idx = TIER_ORDER.index(data["tier"])
-            if idx - 1 >= 0:  # ▲ Сайжрах → index -1
-                data["tier"] = TIER_ORDER[idx - 1]
+            data["tier"] = promote_tier(data["tier"])  # ▲ Сайжрах
             data["score"] = 0
         elif data["score"] <= -5:
-            idx = TIER_ORDER.index(data["tier"])
-            if idx + 1 < len(TIER_ORDER):  # ▼ Дордох → index +1
-                data["tier"] = TIER_ORDER[idx + 1]
+            data["tier"] = demote_tier(data["tier"])  # ▼ Буурах
             data["score"] = 0
         return data
 
@@ -1118,17 +1112,13 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
 
     def adjust_score(data, delta):
         data["score"] += delta
-        idx = TIER_ORDER.index(data["tier"])
         if data["score"] >= 5:
-            if idx - 1 >= 0:  # ▲ ахих = index -1
-                data["tier"] = TIER_ORDER[idx - 1]
+            data["tier"] = promote_tier(data["tier"])
             data["score"] = 0
         elif data["score"] <= -5:
-            if idx + 1 < len(TIER_ORDER):  # ▼ буурах = index +1
-                data["tier"] = TIER_ORDER[idx + 1]
+            data["tier"] = demote_tier(data["tier"])
             data["score"] = 0
         return data
-
 
     winner_details, loser_details = [], []
 
@@ -1359,11 +1349,9 @@ async def undo_last_match(interaction: discord.Interaction):
             old_score = data["score"]
             data["score"] += delta
             if data["score"] >= 5:
-                data["tier"] = demote_tier(data["tier"])  # ✅ дээшлэх = -1
-                data["score"] = 0
+                data["tier"] = promote_tier(...)
             elif data["score"] <= -5:
-                data["tier"] = promote_tier(data["tier"])  # ✅ буурах = +1
-                data["score"] = 0
+                data["tier"] = demote_tier(...)
             member = guild.get_member(uid)
             if member:
                 try:
@@ -1553,10 +1541,10 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         tier = data["tier"]
 
         while score >= 5:
-            tier = demote_tier(tier)  # 🔽 ахих = index -1 = demote → promote-г буруу хэрэглэсэн
+            tier = promote_tier(tier)
             score = 0
         while score <= -5:
-            tier = promote_tier(tier)  # 🔼 буурах = index +1 = promote → эсрэгээрээ
+            tier = demote_tier(tier)
             score = 0
 
         data["score"] = score
