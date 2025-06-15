@@ -1046,7 +1046,8 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
 
     try:
-        await interaction.followup.send("\n".join(lines) + "\n✅ Match бүртгэгдлээ.")
+        lines.append("✅ Match бүртгэгдлээ.")
+        await interaction.followup.send("\n".join(lines))
     except Exception as e:
         print("❌ followup send алдаа:", e)
 
@@ -1223,7 +1224,8 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
 
     try:
-        await interaction.followup.send("\n".join(lines) + "\n✅ Match бүртгэгдлээ.")
+        lines.append("✅ Match бүртгэгдлээ.")
+        await interaction.followup.send("\n".join(lines))
     except Exception as e:
         print("❌ followup send алдаа:", e)
 
@@ -1559,7 +1561,15 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         print("⚠️ nickname update error:", e)
 
     mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
-    await interaction.followup.send(f"✅ Тест оноо {points:+} – {mentions_text}")
+    lines = []
+    for uid in updated:
+        data = await get_score(uid)
+        if not data:
+            continue
+        lines.append(f"<@{uid}>: {data['score']} (Tier: {data['tier']})")
+
+    await interaction.followup.send("✅ Оноо шинэчлэгдлээ:\n" + "\n".join(lines))
+
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
 @app_commands.describe(
