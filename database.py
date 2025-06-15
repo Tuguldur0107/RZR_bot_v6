@@ -3,6 +3,7 @@ import asyncpg
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+import json
 
 DB_URL = os.getenv("DATABASE_URL")
 
@@ -70,20 +71,30 @@ async def insert_match(mode: str, teams: list, winner_team: list, initiator_id: 
     await conn.close()
 
 # 🧠 Сүүлийн match хадгалах
-async def save_last_match(winners: list, losers: list):
+async def save_last_match(winners, losers):
     conn = await connect()
-    await conn.execute("DELETE FROM last_match")  # нэг row байхаар
-    await conn.execute("""
-        INSERT INTO last_match (timestamp, winners, losers)
-        VALUES (NOW(), $1, $2)
-    """, winners, losers)
+    await conn.execute(
+        "INSERT INTO last_match (timestamp, winners, losers) VALUES ($1, $2, $3)",
+        datetime.now(), winners, losers
+    )
     await conn.close()
 
 async def get_last_match():
     conn = await connect()
     row = await conn.fetchrow("SELECT * FROM last_match ORDER BY timestamp DESC LIMIT 1")
     await conn.close()
-    return dict(row) if row else None
+    if row:
+        return {
+            "winners": row["winners"],
+            "losers": row["losers"],
+        }
+    return None
+
+async def clear_last_match():
+    conn = await connect()
+    await conn.execute("DELETE FROM last_match")
+    await conn.close()
+
 
 # 📊 Player stats
 async def update_player_stats(uid: int, is_win: bool, undo: bool = False):
@@ -140,15 +151,34 @@ async def upsert_shield(uid: int, shields: int):
 # 🧠 Session state
 async def save_session_state(data: dict, allow_empty=False):
     print("🧠 save_session_state дуудаж байна:", data)
-    
+
     if not data.get("player_ids") and not allow_empty:
         print("⚠️ player_ids байхгүй тул хадгалахгүй.")
         raise ValueError("⚠️ Session-д player_ids байхгүй тул хадгалахгүй.")
 
     conn = await connect()
-    await conn.execute("INSERT INTO session_state (timestamp, data) VALUES ($1, $2)", datetime.now(), data)
+    await conn.execute("""
+        INSERT INTO session_state (
+            active, start_time, last_win_time, initiator_id,
+            team_count, players_per_team, player_ids,
+            teams, strategy, timestamp
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    """,
+        data.get("active", False),
+        data.get("start_time"),
+        data.get("last_win_time"),
+        data.get("initiator_id"),
+        data.get("team_count", 0),
+        data.get("players_per_team", 0),
+        json.dumps(data.get("player_ids", [])),
+        json.dumps(data.get("teams", [])),
+        data.get("strategy", "unknown"),
+        datetime.now()
+    )
     await conn.close()
     print("✅ session_state хадгалагдлаа.")
+
 
 async def load_session_state():
     try:

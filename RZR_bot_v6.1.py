@@ -20,7 +20,7 @@ from database import (
     promote_tier, demote_tier, get_player_stats,
 
     # 📊 Match
-    save_last_match, get_last_match, insert_match,
+    save_last_match, get_last_match, insert_match,clear_last_match,
 
     # 🧾 Score log
     log_score_transaction,
@@ -96,6 +96,8 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 async def call_gpt_balance_api(team_count, players_per_team, players):
+    import json
+
     with open("prompts/balance_prompt.txt", "r", encoding="utf-8") as f:
         prompt_template = f.read()
 
@@ -108,20 +110,36 @@ async def call_gpt_balance_api(team_count, players_per_team, players):
     try:
         response = await openai.chat.completions.create(
             model="gpt-4o",
-            messages=[{"role": "system", "content": "You're a helpful assistant that balances teams."},
-                      {"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": "You're a helpful assistant that balances teams."},
+                {"role": "user", "content": prompt}
+            ],
             temperature=0.0,
             max_tokens=1024,
             seed=42,
         )
+
         content = response.choices[0].message.content.strip()
-        if content.startswith("```"):
-            content = content.split("```")[1].replace("json", "").strip()
-        parsed = json.loads(content)
-        return parsed.get("teams", [])
+
+        # Markdown блок устгана
+        if "```" in content:
+            parts = content.split("```")
+            for part in parts:
+                try:
+                    parsed = json.loads(part.strip().replace("json", ""))
+                    if "teams" in parsed:
+                        return parsed["teams"]
+                except:
+                    continue  # дараагийн блокыг үзнэ
+            raise ValueError("GPT хариултанд 'teams' JSON блок олдсонгүй.")
+        else:
+            # Шууд JSON гэж үзээд оролдоно
+            parsed = json.loads(content)
+            return parsed.get("teams", [])
+
     except Exception as e:
         print("❌ GPT баг хуваарилалт алдаа:", e)
-        raise
+        raise Exception("GPT баг хуваарилалт амжилтгүй.")
 
 def tier_score(data: dict) -> int:
     tier = data.get("tier", "4-1")
@@ -1353,9 +1371,9 @@ async def undo_last_match(interaction: discord.Interaction):
         print("⚠️ player_stats undo алдаа:", e)
 
     try:
-        await save_last_match([], [])  # 🧹 clear
+        await clear_last_match()  # 🧹 SQL table-ыг цэвэрлэнэ
     except Exception as e:
-        print("⚠️ save_last_match clear алдаа:", e)
+        print("⚠️ clear_last_match алдаа:", e)
 
     try:
         await update_nicknames_for_users(interaction.guild, changed_ids)
