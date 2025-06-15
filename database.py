@@ -174,6 +174,7 @@ async def clear_session_state():
     except Exception as e:
         print("❌ clear_session_state алдаа:", e)
 
+
 async def get_player_stats(uid_list: list[int]):
     if not uid_list:
         return []

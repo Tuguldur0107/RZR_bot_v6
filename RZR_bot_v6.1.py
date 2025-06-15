@@ -39,6 +39,9 @@ from database import (
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise ValueError("❌ OPENAI_API_KEY тохируулагдаагүй байна.")
+openai.api_key = OPENAI_API_KEY
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 GUILD_ID = int(os.getenv("GUILD_ID")) if os.getenv("GUILD_ID") else None
@@ -67,12 +70,13 @@ TEAM_SETUP = {
 
 # ⚙️ Tier config (1-1 → 5-5)
 TIER_ORDER = [
-    "1-1", "1-2", "1-3", "1-4", "1-5",
-    "2-1", "2-2", "2-3", "2-4", "2-5",
-    "3-1", "3-2", "3-3", "3-4", "3-5",
-    "4-1", "4-2", "4-3", "4-4", "4-5",
-    "5-1", "5-2", "5-3", "5-4", "5-5"
+    "5-5", "5-4", "5-3", "5-2", "5-1",
+    "4-5", "4-4", "4-3", "4-2", "4-1",
+    "3-5", "3-4", "3-3", "3-2", "3-1",
+    "2-5", "2-4", "2-3", "2-2", "2-1",
+    "1-5", "1-4", "1-3", "1-2", "1-1"
 ]
+
 TIER_WEIGHT = {
     "1-1": 120, "1-2": 115, "1-3": 110, "1-4": 105, "1-5": 100,
     "2-1":  95, "2-2":  90, "2-3":  85, "2-4":  80, "2-5":  75,
@@ -91,44 +95,55 @@ def calculate_weight(data):
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-def call_gpt_balance_api(team_count, players_per_team, players):
-    prompt = f"""
-Та дараах тоглогчдын онооны дагуу {team_count} багт, тус бүр {players_per_team} хүнтэй тэнцвэртэй баг хуваарилж өгнө үү.
+async def call_gpt_balance_api(team_count, players_per_team, players):
+    with open("prompts/balance_prompt.txt", "r", encoding="utf-8") as f:
+        prompt_template = f.read()
 
-Тоглогчид: {players}
-
-Зөвхөн JSON хэлбэрээр дараах бүтэцтэй буцаа:
-[
-  [uid1, uid2, ...],  # 1-р баг
-  [uid3, uid4, ...]   # 2-р баг
-]
-"""
-    response = openai.ChatCompletion.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.5
+    prompt = prompt_template.format(
+        team_count=team_count,
+        players_per_team=players_per_team,
+        players=json.dumps(players)
     )
-    content = response["choices"][0]["message"]["content"]
-    return json.loads(content)
+
+    try:
+        response = await openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": "You're a helpful assistant that balances teams."},
+                      {"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=1024,
+            seed=42,
+        )
+        content = response.choices[0].message.content.strip()
+        if content.startswith("```"):
+            content = content.split("```")[1].replace("json", "").strip()
+        parsed = json.loads(content)
+        return parsed.get("teams", [])
+    except Exception as e:
+        print("❌ GPT баг хуваарилалт алдаа:", e)
+        raise
 
 def tier_score(data: dict) -> int:
     tier = data.get("tier", "4-1")
     score = data.get("score", 0)
     return TIER_WEIGHT.get(tier, 0) + score
 
-def promote_tier(tier):  # ахих (өргөмжлөх)
+def promote_tier(tier):  # Сайжрах → index -1
     try:
         i = TIER_ORDER.index(tier)
-        return TIER_ORDER[max(i + 1, 0)]  # дээш ахих → index бууруулна
+        return TIER_ORDER[max(i - 1, 0)]
     except:
         return tier
 
-def demote_tier(tier):  # буурах (доошлох)
+def demote_tier(tier):  # Дордох → index +1
     try:
         i = TIER_ORDER.index(tier)
-        return TIER_ORDER[min(i - 1, len(TIER_ORDER) - 1)]  # доош буух → index нэмэгдэнэ
+        return TIER_ORDER[min(i + 1, len(TIER_ORDER) - 1)]
     except:
         return tier
+
+def generate_tier_order():
+    return [f"{i}-{j}" for i in range(5, 0, -1) for j in range(5, 0, -1)]
 
 def get_default_tier():
     return {"score": 0, "tier": "4-1"}
@@ -249,7 +264,6 @@ async def insert_match(
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         """, timestamp, initiator_id, team_count, players_per_team,
              winners, losers, mode, strategy, notes)
-
 
 # ⏱ 24h session timeout
 async def session_timeout_checker():
@@ -710,7 +724,7 @@ async def go_bot(interaction: discord.Interaction):
             "teams": TEAM_SETUP.get("teams"),
             "changed_players": TEAM_SETUP.get("changed_players", []),
             "strategy": strategy
-        })
+        }, allow_empty=True)
     except Exception as e:
         print("❌ save_session_state алдаа /go_bot:", e)
 
@@ -764,13 +778,14 @@ async def go_gpt(interaction: discord.Interaction):
     total_slots = team_count * players_per_team
     player_ids = TEAM_SETUP.get("player_ids", [])
 
-    # ✅ Оноо + tier-ийн жин
+    # ✅ Оноо + tier-ийн жингүүд
     all_scores = []
     for uid in player_ids:
         data = await get_score(uid) or get_default_tier()
         power = TIER_WEIGHT.get(data.get("tier", "4-1"), 0) + data.get("score", 0)
         all_scores.append({"id": uid, "power": power})
 
+    # ✂️ Хэтэрсэн бол тайрах
     sorted_players = sorted(all_scores, key=lambda x: x["power"], reverse=True)
     selected_players = sorted_players[:total_slots]
     left_out_players = sorted_players[total_slots:]
@@ -786,6 +801,7 @@ async def go_gpt(interaction: discord.Interaction):
         )
         return
 
+    # ✅ хадгалалт
     TEAM_SETUP["teams"] = teams
     TEAM_SETUP["strategy"] = "gpt"
     GAME_SESSION["last_win_time"] = datetime.now(timezone.utc)
@@ -801,9 +817,9 @@ async def go_gpt(interaction: discord.Interaction):
         "teams": TEAM_SETUP.get("teams"),
         "changed_players": TEAM_SETUP.get("changed_players", []),
         "strategy": "gpt"
-    })
+    }, allow_empty=True)
 
-    # 📋 Message format
+    # 📋 Мессеж харуулах
     guild = interaction.guild
     team_emojis = ["🥇", "🥈", "🥉", "🎯", "🔥", "🚀", "🎮", "🛡️", "⚔️", "🧠"]
     used_ids = set(uid for team in teams for uid in team)
@@ -880,13 +896,13 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         data["score"] += delta
         if data["score"] >= 5:
             idx = TIER_ORDER.index(data["tier"])
-            if idx + 1 < len(TIER_ORDER):
-                data["tier"] = TIER_ORDER[idx + 1]
+            if idx - 1 >= 0:  # ▲ Сайжрах → index -1
+                data["tier"] = TIER_ORDER[idx - 1]
             data["score"] = 0
         elif data["score"] <= -5:
             idx = TIER_ORDER.index(data["tier"])
-            if idx - 1 >= 0:
-                data["tier"] = TIER_ORDER[idx - 1]
+            if idx + 1 < len(TIER_ORDER):  # ▼ Дордох → index +1
+                data["tier"] = TIER_ORDER[idx + 1]
             data["score"] = 0
         return data
 
@@ -1063,15 +1079,17 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
 
     def adjust_score(data, delta):
         data["score"] += delta
+        idx = TIER_ORDER.index(data["tier"])
         if data["score"] >= 5:
-            if TIER_ORDER.index(data["tier"]) + 1 < len(TIER_ORDER):
-                data["tier"] = TIER_ORDER[TIER_ORDER.index(data["tier"]) + 1]
+            if idx - 1 >= 0:  # ▲ ахих = index -1
+                data["tier"] = TIER_ORDER[idx - 1]
             data["score"] = 0
         elif data["score"] <= -5:
-            if TIER_ORDER.index(data["tier"]) - 1 >= 0:
-                data["tier"] = TIER_ORDER[TIER_ORDER.index(data["tier"]) - 1]
+            if idx + 1 < len(TIER_ORDER):  # ▼ буурах = index +1
+                data["tier"] = TIER_ORDER[idx + 1]
             data["score"] = 0
         return data
+
 
     winner_details, loser_details = [], []
 
@@ -1302,10 +1320,10 @@ async def undo_last_match(interaction: discord.Interaction):
             old_score = data["score"]
             data["score"] += delta
             if data["score"] >= 5:
-                data["tier"] = promote_tier(data["tier"])
+                data["tier"] = demote_tier(data["tier"])  # ✅ дээшлэх = -1
                 data["score"] = 0
             elif data["score"] <= -5:
-                data["tier"] = demote_tier(data["tier"])
+                data["tier"] = promote_tier(data["tier"])  # ✅ буурах = +1
                 data["score"] = 0
             member = guild.get_member(uid)
             if member:
@@ -1496,10 +1514,10 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         tier = data["tier"]
 
         while score >= 5:
-            tier = promote_tier(tier)
+            tier = demote_tier(tier)  # 🔽 ахих = index -1 = demote → promote-г буруу хэрэглэсэн
             score = 0
         while score <= -5:
-            tier = demote_tier(tier)
+            tier = promote_tier(tier)  # 🔼 буурах = index +1 = promote → эсрэгээрээ
             score = 0
 
         data["score"] = score
