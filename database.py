@@ -12,7 +12,6 @@ async def connect():
 
 # database.py файлд дараах функцуудыг нэм:
 
-
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -93,7 +92,6 @@ async def clear_last_match():
     conn = await connect()
     await conn.execute("DELETE FROM last_match")
     await conn.close()
-
 
 # 📊 Player stats
 async def update_player_stats(uid: int, is_win: bool, undo: bool = False):
@@ -182,8 +180,6 @@ async def save_session_state(data: dict, allow_empty=False):
     await conn.close()
     print("✅ session_state хадгалагдлаа.")
 
-
-
 async def load_session_state():
     try:
         conn = await connect()
@@ -207,7 +203,6 @@ async def clear_session_state():
         print("🧼 session_state DB цэвэрлэгдлээ")
     except Exception as e:
         print("❌ clear_session_state алдаа:", e)
-
 
 async def get_player_stats(uid_list: list[int]):
     if not uid_list:

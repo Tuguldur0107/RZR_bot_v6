@@ -329,10 +329,31 @@ async def update_nicknames_for_users(guild, user_ids: list):
 @bot.event
 async def on_ready():
     print(f"🤖 Bot нэвтэрлээ: {bot.user}")
+    print("📁 Working directory:", os.getcwd())
+
+    # ⚙️ Slash командуудыг global sync хийнэ
     await bot.tree.sync()
-    await init_pool()
-    print("✅ Bot started & DB pool initialized.")
+
+    # 🧠 Async task-аар session болон DB pool initialize хийнэ
+    asyncio.create_task(initialize_bot())
+
+    # 🕓 Timeout шалгагчийг эхлүүлнэ
     asyncio.create_task(session_timeout_checker())
+
+
+async def initialize_bot():
+    try:
+        await init_pool()
+        print("✅ DB pool initialized.")
+    except Exception as e:
+        print("❌ DB pool initialization алдаа:", e)
+
+    try:
+        await load_session_state()
+        print("📥 Session state амжилттай ачаалагдлаа.")
+    except Exception as e:
+        print("❌ Session ачаалах үед алдаа гарлаа:", e)
+
 
 # 🧩 Command: ping
 @bot.tree.command(name="ping", description="Bot-ийн latency-г шалгана")
