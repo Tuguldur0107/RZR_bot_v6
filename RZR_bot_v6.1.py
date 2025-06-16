@@ -332,12 +332,16 @@ async def session_timeout_checker():
 
             try:
                 last_win_time = datetime.fromisoformat(last_win_time_str)
+                if last_win_time.tzinfo is None:
+                    last_win_time = last_win_time.replace(tzinfo=timezone.utc)  # ✅ FIX
+
                 now = datetime.now(timezone.utc)
                 if (now - last_win_time).total_seconds() > 86400:
-                    await clear_session_state()  # ✅ Шууд устгана
+                    await clear_session_state()
                     print("🔚 Session автоматаар хаагдлаа (24h).")
             except Exception as e:
                 print("⚠️ session_timeout_checker parse алдаа:", e)
+
 
 
 # 🧬 Start
