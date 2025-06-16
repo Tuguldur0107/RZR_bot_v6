@@ -327,7 +327,7 @@ async def insert_match(
 async def session_timeout_checker():
     await bot.wait_until_ready()
     while not bot.is_closed():
-        await asyncio.sleep(60)
+        await asyncio.sleep(3600)
 
         session = await load_session_state()
         if not session:

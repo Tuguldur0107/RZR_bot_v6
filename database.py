@@ -201,9 +201,9 @@ async def load_session_state():
         await conn.close()
 
         if not row:
+            print("ℹ️ session_state хоосон байна.")
             return None
 
-        # 🔁 JSON-руу буцааж хөрвүүлнэ
         session = {
             "active": row["active"],
             "start_time": row["start_time"].isoformat() if row["start_time"] else None,
@@ -216,12 +216,12 @@ async def load_session_state():
             "changed_players": json.loads(row["changed_players"] or "[]"),
             "strategy": row["strategy"],
         }
-        #print("✅ session_state амжилттай ачаалагдлаа.")
         return session
 
     except Exception as e:
         print("❌ load_session_state алдаа:", e)
         return None
+
 
 
 async def clear_session_state():
