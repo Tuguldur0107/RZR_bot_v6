@@ -216,7 +216,7 @@ async def load_session_state():
             "changed_players": json.loads(row["changed_players"] or "[]"),
             "strategy": row["strategy"],
         }
-        print("📥 session_state loaded:", session)
+        print("✅ session_state амжилттай ачаалагдлаа.")
         return session
 
     except Exception as e:
