@@ -14,6 +14,7 @@ import asyncpg
 from database import init_pool
 from database import pool
 from database import clear_session_state
+import traceback
 from database import (
     # 🎯 Score & tier
     get_score, upsert_score, get_all_scores, get_default_tier,
@@ -1561,6 +1562,7 @@ async def donator_list(interaction: discord.Interaction):
 
     except Exception as e:
         print("❌ donator_list exception:", e)
+        traceback.print_exc()  # 🔍 Алдааны дэлгэрэнгүй stack trace
         await interaction.followup.send("⚠️ Donator жагсаалт авахад алдаа гарлаа.")
 
 
