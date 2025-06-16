@@ -306,7 +306,6 @@ async def insert_match(
     strategy: str,
     notes: str = ""
 ):
-    pool = await asyncpg.create_pool(...)
     async with pool.acquire() as conn:
         await conn.execute("""
             INSERT INTO matches (
