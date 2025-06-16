@@ -186,17 +186,33 @@ async def save_session_state(data: dict, allow_empty=False):
 async def load_session_state():
     try:
         conn = await connect()
-        row = await conn.fetchrow("SELECT data FROM session_state ORDER BY timestamp DESC LIMIT 1")
+        row = await conn.fetchrow("SELECT * FROM session_state ORDER BY timestamp DESC LIMIT 1")
         await conn.close()
-        if row and "data" in row:
-            print("📥 session_state loaded:", row["data"])
-            return row["data"]
-        else:
+
+        if not row:
             print("⚠️ session_state хоосон байна")
             return None
+
+        # 🔁 JSON-руу буцааж хөрвүүлнэ
+        session = {
+            "active": row["active"],
+            "start_time": row["start_time"].isoformat() if row["start_time"] else None,
+            "last_win_time": row["last_win_time"].isoformat() if row["last_win_time"] else None,
+            "initiator_id": row["initiator_id"],
+            "team_count": row["team_count"],
+            "players_per_team": row["players_per_team"],
+            "player_ids": json.loads(row["player_ids"] or "[]"),
+            "teams": json.loads(row["teams"] or "[]"),
+            "changed_players": json.loads(row["changed_players"] or "[]"),
+            "strategy": row["strategy"],
+        }
+        print("📥 session_state loaded:", session)
+        return session
+
     except Exception as e:
         print("❌ load_session_state алдаа:", e)
         return None
+
 
 async def clear_session_state():
     try:
