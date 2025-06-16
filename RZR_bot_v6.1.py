@@ -14,8 +14,9 @@ import asyncpg
 from database import init_pool
 from database import pool
 from database import clear_session_state
-import traceback
+import traceback # алдааг server log дээр дэлгэрэнгүй харуулна.
 from datetime import datetime, timezone
+from discord import Embed
 from database import (
     # 🎯 Score & tier
     get_score, upsert_score, get_all_scores, get_default_tier,
@@ -1542,31 +1543,50 @@ async def donator_list(interaction: discord.Interaction):
         await interaction.response.defer(thinking=True)
 
         donors = await get_all_donators()
-        print("🔍 Donators:", donors)  # Debug log
-
         if not donors:
             return await interaction.followup.send("📭 Donator бүртгэл алга байна.")
 
         scores = await get_all_scores()
-        msg = ["💖 **Donators:**\n"]
+
+        header_line = "💰" * 25
+        footer_line = "💖" * 25
+        separator = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━─────────────"
+
+        lines = [f"```", header_line, separator]
 
         for uid, data in sorted(donors.items(), key=lambda x: x[1].get("total_mnt", 0), reverse=True):
             member = interaction.guild.get_member(int(uid))
             if not member:
-                print(f"⚠️ {uid} discord дээр байхгүй байна.")
                 continue
 
             emoji = get_donator_emoji(data) or ""
             total = data.get("total_mnt", 0)
             tier = scores.get(uid, {}).get("tier", "4-1")
             nick = clean_nickname(member.display_name)
-            msg.append(f"{emoji} {tier} | {nick} — {total:,}₮\n")
 
-        await interaction.followup.send("".join(msg))
+            name_section = f"{emoji} {tier} | {nick}"
+            donation_section = f"{total:>7,}₮"
+            line = f"{name_section:<35} — {donation_section}"
+            lines.append(line)
+
+        lines.append(separator)
+        lines.append(footer_line)
+        lines.append("```")
+
+        embed = Embed(
+            title="💖 Donators",
+            description="**Талархал илэрхийлье! Доорх хэрэглэгчид манай server-г дэмжиж, хөгжлийг нь тэтгэсэн байна.**",
+            color=0xFFD700
+        )
+        embed.add_field(name="Дэмжигчдийн жагсаалт", value="\n".join(lines), inline=False)
+        embed.set_footer(text="RZR Bot 🌀")
+
+        await interaction.followup.send(embed=embed)
 
     except Exception as e:
+        import traceback
         print("❌ donator_list exception:", e)
-        traceback.print_exc()  # 🔍 Алдааны дэлгэрэнгүй stack trace
+        traceback.print_exc()
         await interaction.followup.send("⚠️ Donator жагсаалт авахад алдаа гарлаа.")
 
 
