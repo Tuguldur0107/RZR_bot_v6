@@ -117,7 +117,7 @@ async def update_player_stats(uid: int, is_win: bool, undo: bool = False):
 # 💖 Donator info
 async def get_all_donators():
     conn = await connect()
-    rows = await conn.fetch("SELECT * FROM donators")
+    rows = await conn.fetch("SELECT uid, total_mnt, last_donated FROM donators ORDER BY pk ASC")
     await conn.close()
     return {str(row["uid"]): dict(row) for row in rows}
 

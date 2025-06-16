@@ -1027,8 +1027,8 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             except Exception as e:
                 print("❌ loser_details render алдаа:", e)
 
+    lines.append("✅ Match бүртгэгдлээ.")
     await interaction.followup.send("\n".join(lines))
-    await interaction.followup.send("✅ Match бүртгэгдлээ.")
 
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -1201,8 +1201,8 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             except Exception as e:
                 print("❌ loser_details render алдаа:", e)
 
+    lines.append("✅ Match бүртгэгдлээ.")
     await interaction.followup.send("\n".join(lines))
-    await interaction.followup.send("✅ Match бүртгэгдлээ.")
 
 @bot.tree.command(name="change_player", description="Багийн гишүүдийг солих")
 @app_commands.describe(
