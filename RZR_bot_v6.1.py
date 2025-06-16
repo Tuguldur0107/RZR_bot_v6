@@ -384,7 +384,12 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
-
+    # ✅ өмнөх session цэвэрлэх хэсэг
+    try:
+        await clear_session_state()
+        print("🧼 өмнөх session_state устлаа.")
+    except Exception as e:
+        print("❌ clear_session_state алдаа:", e)
     try:
         now = datetime.now(timezone.utc)
 
@@ -981,19 +986,49 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     lines = [f"🏆 {win_str} ялж {lose_str} ялагдлаа.\nОноо, Tier шинэчлэгдлээ."]
 
     if winner_details:
-        lines.append("\n✅ Ялсан тоглогчид:")
+        lines.append("")
+        lines.append("✅ **Ялсан тоглогчид:**")
         for p in winner_details:
-            change = " ⬆" if TIER_ORDER.index(p["new_tier"]) < TIER_ORDER.index(p["old_tier"]) else (" ⬇" if TIER_ORDER.index(p["new_tier"]) > TIER_ORDER.index(p["old_tier"]) else "")
-            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+            try:
+                old_tier = p.get("old_tier", "4-1")
+                new_tier = p.get("new_tier", "4-1")
+                old_score = p.get("old_score", 0)
+                new_score = p.get("new_score", 0)
+                uid = p["uid"]
+
+                if old_tier not in TIER_ORDER or new_tier not in TIER_ORDER:
+                    continue
+
+                change = "⬆" if TIER_ORDER.index(new_tier) < TIER_ORDER.index(old_tier) else (
+                        "⬇" if TIER_ORDER.index(new_tier) > TIER_ORDER.index(old_tier) else "")
+
+                lines.append(f"- <@{uid}>: `{old_score} → {new_score}` (Tier: `{old_tier} → {new_tier}`) {change}")
+            except Exception as e:
+                print("❌ winner_details render алдаа:", e)
 
     if loser_details:
-        lines.append("\n💀 Ялагдсан тоглогчид:")
+        lines.append("")
+        lines.append("💀 **Ялагдсан тоглогчид:**")
         for p in loser_details:
-            change = " ⬆" if TIER_ORDER.index(p["new_tier"]) < TIER_ORDER.index(p["old_tier"]) else (" ⬇" if TIER_ORDER.index(p["new_tier"]) > TIER_ORDER.index(p["old_tier"]) else "")
-            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+            try:
+                old_tier = p.get("old_tier", "4-1")
+                new_tier = p.get("new_tier", "4-1")
+                old_score = p.get("old_score", 0)
+                new_score = p.get("new_score", 0)
+                uid = p["uid"]
 
-    lines.append("✅ Match бүртгэгдлээ.")
+                if old_tier not in TIER_ORDER or new_tier not in TIER_ORDER:
+                    continue
+
+                change = "⬆" if TIER_ORDER.index(new_tier) < TIER_ORDER.index(old_tier) else (
+                        "⬇" if TIER_ORDER.index(new_tier) > TIER_ORDER.index(old_tier) else "")
+
+                lines.append(f"- <@{uid}>: `{old_score} → {new_score}` (Tier: `{old_tier} → {new_tier}`) {change}")
+            except Exception as e:
+                print("❌ loser_details render алдаа:", e)
+
     await interaction.followup.send("\n".join(lines))
+    await interaction.followup.send("✅ Match бүртгэгдлээ.")
 
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -1123,19 +1158,51 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
     lines = [f"💦 {win_str} Fountain ялж {lose_str} ялагдлаа.\nОноо, Tier шинэчлэгдлээ."]
 
     if winner_details:
-        lines.append("\n✅ Ялсан тоглогчид:")
+        lines.append("")
+        lines.append("✅ **Ялсан тоглогчид:**")
         for p in winner_details:
-            change = " ⬆" if TIER_ORDER.index(p["new_tier"]) < TIER_ORDER.index(p["old_tier"]) else (" ⬇" if TIER_ORDER.index(p["new_tier"]) > TIER_ORDER.index(p["old_tier"]) else "")
-            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+            try:
+                old_tier = p.get("old_tier", "4-1")
+                new_tier = p.get("new_tier", "4-1")
+                old_score = p.get("old_score", 0)
+                new_score = p.get("new_score", 0)
+                uid = p["uid"]
+
+                if old_tier not in TIER_ORDER or new_tier not in TIER_ORDER:
+                    print(f"⚠️ Tier алдаа: uid={uid}, old={old_tier}, new={new_tier}")
+                    continue
+
+                change = "⬆" if TIER_ORDER.index(new_tier) < TIER_ORDER.index(old_tier) else (
+                        "⬇" if TIER_ORDER.index(new_tier) > TIER_ORDER.index(old_tier) else "")
+
+                lines.append(f"- <@{uid}>: `{old_score} → {new_score}` (Tier: `{old_tier} → {new_tier}`) {change}")
+            except Exception as e:
+                print("❌ winner_details render алдаа:", e)
 
     if loser_details:
-        lines.append("\n💀 Ялагдсан тоглогчид:")
+        lines.append("")
+        lines.append("💀 **Ялагдсан тоглогчид:**")
         for p in loser_details:
-            change = " ⬆" if TIER_ORDER.index(p["new_tier"]) < TIER_ORDER.index(p["old_tier"]) else (" ⬇" if TIER_ORDER.index(p["new_tier"]) > TIER_ORDER.index(p["old_tier"]) else "")
-            lines.append(f"- <@{p['uid']}>: {p['old_score']} → {p['new_score']} (Tier: {p['old_tier']} → {p['new_tier']}){change}")
+            try:
+                old_tier = p.get("old_tier", "4-1")
+                new_tier = p.get("new_tier", "4-1")
+                old_score = p.get("old_score", 0)
+                new_score = p.get("new_score", 0)
+                uid = p["uid"]
 
-    lines.append("✅ Match бүртгэгдлээ.")
+                if old_tier not in TIER_ORDER or new_tier not in TIER_ORDER:
+                    print(f"⚠️ Tier алдаа: uid={uid}, old={old_tier}, new={new_tier}")
+                    continue
+
+                change = "⬆" if TIER_ORDER.index(new_tier) < TIER_ORDER.index(old_tier) else (
+                        "⬇" if TIER_ORDER.index(new_tier) > TIER_ORDER.index(old_tier) else "")
+
+                lines.append(f"- <@{uid}>: `{old_score} → {new_score}` (Tier: `{old_tier} → {new_tier}`) {change}")
+            except Exception as e:
+                print("❌ loser_details render алдаа:", e)
+
     await interaction.followup.send("\n".join(lines))
+    await interaction.followup.send("✅ Match бүртгэгдлээ.")
 
 @bot.tree.command(name="change_player", description="Багийн гишүүдийг солих")
 @app_commands.describe(
@@ -1461,10 +1528,7 @@ async def add_donator(interaction: discord.Interaction, member: discord.Member, 
 @bot.tree.command(name="donator_list", description="Donator хэрэглэгчдийн жагсаалт")
 async def donator_list(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message(
-            "❌ Энэ командыг зөвхөн админ хэрэглэгч ашиглаж болно.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("❌ Энэ командыг зөвхөн админ хэрэглэгч ашиглаж болно.", ephemeral=True)
         return
 
     try:
@@ -1483,14 +1547,17 @@ async def donator_list(interaction: discord.Interaction):
 
     for uid, data in sorted_donors:
         member = interaction.guild.get_member(int(uid))
-        if member:
-            emoji = get_donator_emoji(data)
-            total = data.get("total_mnt", 0)
-            tier = scores.get(uid, {}).get("tier", "4-1")
-            display_name = clean_nickname(member.display_name)
+        if not member:
+            continue
 
-            display = f"{emoji} {tier} | {display_name}" if emoji else f"{tier} | {display_name}"
-            msg += f"{display} — {total:,}₮\n"
+        emoji = get_donator_emoji(data)
+        score_data = scores.get(uid, {})
+        tier = score_data.get("tier", "4-1")
+        username = score_data.get("username", member.display_name or member.name)
+        display_name = clean_nickname(username)
+
+        display = f"{emoji} {tier} | {display_name}" if emoji else f"{tier} | {display_name}"
+        msg += f"{display} — {data.get('total_mnt', 0):,}₮\n"
 
     await interaction.followup.send(msg)
 
