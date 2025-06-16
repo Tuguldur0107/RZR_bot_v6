@@ -1528,38 +1528,41 @@ async def add_donator(interaction: discord.Interaction, member: discord.Member, 
 @bot.tree.command(name="donator_list", description="Donator хэрэглэгчдийн жагсаалт")
 async def donator_list(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Энэ командыг зөвхөн админ хэрэглэгч ашиглаж болно.", ephemeral=True)
-        return
+        return await interaction.response.send_message(
+            "❌ Энэ командыг зөвхөн админ хэрэглэгч ашиглаж болно.",
+            ephemeral=True
+        )
 
     try:
         await interaction.response.defer(thinking=True)
-    except discord.errors.InteractionResponded:
-        return
 
-    donors = await get_all_donators()
-    if not donors:
-        await interaction.followup.send("📭 Donator бүртгэл алга байна.")
-        return
+        donors = await get_all_donators()
+        print("🔍 Donators:", donors)  # Debug log
 
-    scores = await get_all_scores()
-    msg = "💖 **Donators:**\n"
-    sorted_donors = sorted(donors.items(), key=lambda x: x[1].get("total_mnt", 0), reverse=True)
+        if not donors:
+            return await interaction.followup.send("📭 Donator бүртгэл алга байна.")
 
-    for uid, data in sorted_donors:
-        member = interaction.guild.get_member(int(uid))
-        if not member:
-            continue
+        scores = await get_all_scores()
+        msg = ["💖 **Donators:**\n"]
 
-        emoji = get_donator_emoji(data)
-        score_data = scores.get(uid, {})
-        tier = score_data.get("tier", "4-1")
-        username = score_data.get("username", member.display_name or member.name)
-        display_name = clean_nickname(username)
+        for uid, data in sorted(donors.items(), key=lambda x: x[1].get("total_mnt", 0), reverse=True):
+            member = interaction.guild.get_member(int(uid))
+            if not member:
+                print(f"⚠️ {uid} discord дээр байхгүй байна.")
+                continue
 
-        display = f"{emoji} {tier} | {display_name}" if emoji else f"{tier} | {display_name}"
-        msg += f"{display} — {data.get('total_mnt', 0):,}₮\n"
+            emoji = get_donator_emoji(data) or ""
+            total = data.get("total_mnt", 0)
+            tier = scores.get(uid, {}).get("tier", "4-1")
+            nick = clean_nickname(member.display_name)
+            msg.append(f"{emoji} {tier} | {nick} — {total:,}₮\n")
 
-    await interaction.followup.send(msg)
+        await interaction.followup.send("".join(msg))
+
+    except Exception as e:
+        print("❌ donator_list exception:", e)
+        await interaction.followup.send("⚠️ Donator жагсаалт авахад алдаа гарлаа.")
+
 
 @bot.tree.command(name="help_info", description="Bot-ын танилцуулга (readme.md файлыг харуулна)")
 async def help_info(interaction: discord.Interaction):
