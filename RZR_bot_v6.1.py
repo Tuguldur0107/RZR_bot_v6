@@ -388,8 +388,8 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
 
         await save_session_state({
             "active": True,
-            "start_time": now.isoformat(),
-            "last_win_time": now.isoformat(),
+            "start_time": now,           # ✅ зассан
+            "last_win_time": now,       # ✅ зассан
             "initiator_id": interaction.user.id,
             "team_count": team_count,
             "players_per_team": players_per_team,
@@ -429,6 +429,11 @@ async def addme(interaction: discord.Interaction):
 
         player_ids.append(user_id)
         session["player_ids"] = player_ids
+        # 🧠 datetime хөрвүүлэлт хийж өгнө
+        if isinstance(session.get("start_time"), str):
+            session["start_time"] = datetime.fromisoformat(session["start_time"])
+        if isinstance(session.get("last_win_time"), str):
+            session["last_win_time"] = datetime.fromisoformat(session["last_win_time"])
 
         await save_session_state(session)
         await interaction.followup.send(
@@ -503,6 +508,11 @@ async def remove(interaction: discord.Interaction):
         except ValueError:
             await interaction.followup.send("⚠️ Та бүртгэлээс аль хэдийн хасагдсан байна.")
             return
+        # 🧠 datetime хөрвүүлэлт
+        if isinstance(session.get("start_time"), str):
+            session["start_time"] = datetime.fromisoformat(session["start_time"])
+        if isinstance(session.get("last_win_time"), str):
+            session["last_win_time"] = datetime.fromisoformat(session["last_win_time"])
 
         await save_session_state(session)
 
@@ -550,6 +560,11 @@ async def remove_user(interaction: discord.Interaction, mention: str):
             removed += 1
 
     session["player_ids"] = player_ids
+    # ✅ datetime хөрвүүлэлт
+    if isinstance(session.get("start_time"), str):
+        session["start_time"] = datetime.fromisoformat(session["start_time"])
+    if isinstance(session.get("last_win_time"), str):
+        session["last_win_time"] = datetime.fromisoformat(session["last_win_time"])
 
     try:
         await save_session_state(session)
