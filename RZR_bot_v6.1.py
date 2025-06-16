@@ -1,42 +1,43 @@
-import discord
-from discord.ext import commands
-from discord import app_commands
-import asyncio
+# 🌐 Built-in modules
 import os
-from dotenv import load_dotenv
-from datetime import datetime, timezone, timedelta
-import openai
 import json
-from database import update_player_stats
-from database import connect
+import asyncio
+import traceback
+from datetime import datetime, timezone, timedelta
+
+# 🌿 Third-party modules
+import discord
+from discord import app_commands, Embed
+from discord.ext import commands
 from dotenv import load_dotenv
 import asyncpg
-from database import init_pool
-from database import pool
-from database import clear_session_state
-import traceback # алдааг server log дээр дэлгэрэнгүй харуулна.
-from datetime import datetime, timezone
-from discord import Embed
+import openai
+
+# 🗄️ Local modules
 from database import (
+    connect, pool, init_pool,
+
     # 🎯 Score & tier
     get_score, upsert_score, get_all_scores, get_default_tier,
-    promote_tier, demote_tier, get_player_stats,
+    promote_tier, demote_tier, get_player_stats, update_player_stats,
 
     # 📊 Match
-    save_last_match, get_last_match, insert_match,clear_last_match,
+    save_last_match, get_last_match, insert_match, clear_last_match,
 
     # 🧾 Score log
     log_score_transaction,
 
     # 🛡 Session
-    save_session_state, load_session_state,
+    save_session_state, load_session_state, clear_session_state,
 
     # 💖 Donator
     get_all_donators, upsert_donator,
 
-    # 🛡 Shields (хэрвээ ашиглаж байвал)
+    # 🛡 Shields
     get_shields, upsert_shield
 )
+
+
 
 # 🌐 ENV
 load_dotenv()
@@ -300,6 +301,7 @@ async def update_nicknames_for_users(guild, user_ids: list):
             await member.edit(nick=new_nick)
         except Exception as e:
             print(f"⚠️ Nickname update алдаа: {uid} — {e}")
+            traceback.print_exc()
 
 async def insert_match(
     timestamp: datetime,
@@ -1584,7 +1586,6 @@ async def donator_list(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
-        import traceback
         print("❌ donator_list exception:", e)
         traceback.print_exc()
         await interaction.followup.send("⚠️ Donator жагсаалт авахад алдаа гарлаа.")
