@@ -69,11 +69,11 @@ async def insert_match(mode: str, teams: list, winner_team: list, initiator_id: 
     await conn.close()
 
 # 🧠 Сүүлийн match хадгалах
-async def save_last_match(winners, losers):
+async def save_last_match(winner_details, loser_details):
     conn = await connect()
     await conn.execute(
         "INSERT INTO last_match (timestamp, winners, losers) VALUES ($1, $2, $3)",
-        datetime.now(), winners, losers
+        datetime.now(), winner_details, loser_details
     )
     await conn.close()
 
@@ -83,8 +83,11 @@ async def get_last_match():
     await conn.close()
     if row:
         return {
+            "timestamp": row["timestamp"],
             "winners": row["winners"],
             "losers": row["losers"],
+            "winner_details": row["winner_details"],
+            "loser_details": row["loser_details"],
         }
     return None
 
