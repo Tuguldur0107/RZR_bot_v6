@@ -15,6 +15,7 @@ from database import init_pool
 from database import pool
 from database import clear_session_state
 import traceback
+from datetime import datetime, timezone
 from database import (
     # 🎯 Score & tier
     get_score, upsert_score, get_all_scores, get_default_tier,
@@ -242,9 +243,11 @@ def get_donator_emoji(data):
     if not last_donated:
         return None
 
-    # ISO string гэж үзэхгүйгээр шууд datetime гэж үзнэ
     try:
         donated_time = last_donated if isinstance(last_donated, datetime) else datetime.fromisoformat(str(last_donated))
+        # 🛡️ Timezone-гүй байвал UTC болгож тохируулна
+        if donated_time.tzinfo is None:
+            donated_time = donated_time.replace(tzinfo=timezone.utc)
     except Exception as e:
         print("❌ Emoji parse fail:", e)
         return None
@@ -260,6 +263,7 @@ def get_donator_emoji(data):
         return "💸"
     else:
         return "💰"
+
 
 def clean_nickname(nick: str) -> str:
     if not nick:
