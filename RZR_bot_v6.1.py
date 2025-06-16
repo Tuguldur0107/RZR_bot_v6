@@ -382,14 +382,12 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
         return
 
     try:
-        await clear_session_state()
-
         now = datetime.now(timezone.utc)
 
         await save_session_state({
             "active": True,
-            "start_time": now,           # ✅ зассан
-            "last_win_time": now,       # ✅ зассан
+            "start_time": now.isoformat(),         # ← ✅ datetime → ISO
+            "last_win_time": now.isoformat(),      # ← ✅ datetime → ISO
             "initiator_id": interaction.user.id,
             "team_count": team_count,
             "players_per_team": players_per_team,
