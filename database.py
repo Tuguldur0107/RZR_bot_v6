@@ -156,14 +156,14 @@ async def save_session_state(data: dict, allow_empty=False):
         print("⚠️ player_ids байхгүй тул хадгалахгүй.")
         raise ValueError("⚠️ Session-д player_ids байхгүй тул хадгалахгүй.")
 
-    # 🕒 datetime → ISO string болгоно
+    # 🕒 datetime string бол datetime болгоно
     start_time = data.get("start_time")
     last_win_time = data.get("last_win_time")
 
-    if isinstance(start_time, datetime):
-        start_time = start_time.isoformat()
-    if isinstance(last_win_time, datetime):
-        last_win_time = last_win_time.isoformat()
+    if isinstance(start_time, str):
+        start_time = datetime.fromisoformat(start_time)
+    if isinstance(last_win_time, str):
+        last_win_time = datetime.fromisoformat(last_win_time)
 
     conn = await connect()
     await conn.execute("""
@@ -191,6 +191,7 @@ async def save_session_state(data: dict, allow_empty=False):
     )
     await conn.close()
     print("✅ session_state хадгалагдлаа.")
+
 
 
 async def load_session_state():
