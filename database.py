@@ -150,10 +150,10 @@ async def upsert_shield(uid: int, shields: int):
 
 # 🧠 Session state
 async def save_session_state(data: dict, allow_empty=False):
-    print("🧠 save_session_state дуудаж байна:", data)
+    #print("🧠 save_session_state дуудаж байна:", data)
 
     if not data.get("player_ids") and not allow_empty:
-        print("⚠️ player_ids байхгүй тул хадгалахгүй.")
+        #print("⚠️ player_ids байхгүй тул хадгалахгүй.")
         raise ValueError("⚠️ Session-д player_ids байхгүй тул хадгалахгүй.")
 
     # 🕒 datetime string бол datetime болгоно
@@ -190,7 +190,7 @@ async def save_session_state(data: dict, allow_empty=False):
         datetime.now()
     )
     await conn.close()
-    print("✅ session_state хадгалагдлаа.")
+    #print("✅ session_state хадгалагдлаа.")
 
 
 
@@ -201,7 +201,7 @@ async def load_session_state():
         await conn.close()
 
         if not row:
-            print("ℹ️ session_state хоосон байна.")
+            #print("ℹ️ session_state хоосон байна.")
             return None
 
         session = {
@@ -219,7 +219,7 @@ async def load_session_state():
         return session
 
     except Exception as e:
-        print("❌ load_session_state алдаа:", e)
+        #print("❌ load_session_state алдаа:", e)
         return None
 
 
