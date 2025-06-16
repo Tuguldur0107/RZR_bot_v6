@@ -156,6 +156,15 @@ async def save_session_state(data: dict, allow_empty=False):
         print("⚠️ player_ids байхгүй тул хадгалахгүй.")
         raise ValueError("⚠️ Session-д player_ids байхгүй тул хадгалахгүй.")
 
+    # 🕒 datetime → ISO string болгоно
+    start_time = data.get("start_time")
+    last_win_time = data.get("last_win_time")
+
+    if isinstance(start_time, datetime):
+        start_time = start_time.isoformat()
+    if isinstance(last_win_time, datetime):
+        last_win_time = last_win_time.isoformat()
+
     conn = await connect()
     await conn.execute("""
         INSERT INTO session_state (
@@ -169,8 +178,8 @@ async def save_session_state(data: dict, allow_empty=False):
         )
     """,
         data.get("active", False),
-        data.get("start_time"),
-        data.get("last_win_time"),
+        start_time,
+        last_win_time,
         data.get("initiator_id"),
         data.get("team_count", 0),
         data.get("players_per_team", 0),
@@ -183,6 +192,7 @@ async def save_session_state(data: dict, allow_empty=False):
     await conn.close()
     print("✅ session_state хадгалагдлаа.")
 
+
 async def load_session_state():
     try:
         conn = await connect()
@@ -190,7 +200,6 @@ async def load_session_state():
         await conn.close()
 
         if not row:
-            print("⚠️ session_state хоосон байна")
             return None
 
         # 🔁 JSON-руу буцааж хөрвүүлнэ
