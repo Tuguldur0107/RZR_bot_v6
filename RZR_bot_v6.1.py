@@ -1036,7 +1036,20 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
                 print("❌ loser_details render алдаа:", e)
 
     lines.append("✅ Match бүртгэгдлээ.")
-    await interaction.followup.send("\n".join(lines))
+
+    # ✅ Хэт урт мессежийг хэсэгчилж илгээнэ
+    chunks = []
+    current = ""
+    for line in lines:
+        if len(current) + len(line) + 1 > 1900:
+            chunks.append(current)
+            current = ""
+        current += line + "\n"
+    if current:
+        chunks.append(current)
+
+    for chunk in chunks:
+        await interaction.followup.send(chunk)
 
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -1210,7 +1223,19 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
                 print("❌ loser_details render алдаа:", e)
 
     lines.append("✅ Match бүртгэгдлээ.")
-    await interaction.followup.send("\n".join(lines))
+        # ✅ Хэт урт мессежийг хэсэгчилж илгээнэ
+    chunks = []
+    current = ""
+    for line in lines:
+        if len(current) + len(line) + 1 > 1900:
+            chunks.append(current)
+            current = ""
+        current += line + "\n"
+    if current:
+        chunks.append(current)
+
+    for chunk in chunks:
+        await interaction.followup.send(chunk)
 
 @bot.tree.command(name="change_player", description="Багийн гишүүдийг солих")
 @app_commands.describe(
