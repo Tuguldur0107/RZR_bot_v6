@@ -1590,7 +1590,6 @@ async def donator_list(interaction: discord.Interaction):
         traceback.print_exc()
         await interaction.followup.send("⚠️ Donator жагсаалт авахад алдаа гарлаа.")
 
-
 @bot.tree.command(name="help_info", description="Bot-ын танилцуулга (readme.md файлыг харуулна)")
 async def help_info(interaction: discord.Interaction):
     try:

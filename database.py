@@ -119,7 +119,16 @@ async def get_all_donators():
     conn = await connect()
     rows = await conn.fetch("SELECT uid, total_mnt, last_donated FROM donators ORDER BY pk ASC")
     await conn.close()
-    return {str(row["uid"]): dict(row) for row in rows}
+    # ❌ print log байх ёсгүй!
+    return {
+        str(row["uid"]): {
+            "uid": row["uid"],
+            "total_mnt": row["total_mnt"],
+            "last_donated": row["last_donated"]
+        }
+        for row in rows
+    }
+
 
 async def upsert_donator(uid: int, mnt: int):
     conn = await connect()
