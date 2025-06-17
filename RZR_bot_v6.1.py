@@ -1593,7 +1593,9 @@ async def donator_list(interaction: discord.Interaction):
 
             name_section = f"{emoji} {tier} | {nick}"
             donation_section = f"{total:>7,}₮"
-            line = f"{name_section:<47} — {donation_section:>10,}₮"
+            donation_section = f"{int(total):,}"  # 💵 format as number with commas
+            line = f"{name_section:<47} — {donation_section:>10}₮"
+
             lines.append(line)
 
         lines.append(separator)
