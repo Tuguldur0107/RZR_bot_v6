@@ -1550,9 +1550,9 @@ async def donator_list(interaction: discord.Interaction):
 
         scores = await get_all_scores()
 
-        header_line = "💰" * 25
-        footer_line = "💖" * 25
-        separator = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━─────────────"
+        header_line = "💰" * 24
+        footer_line = "💖" * 24
+        separator = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
         lines = [f"```", header_line, separator]
 
@@ -1568,7 +1568,7 @@ async def donator_list(interaction: discord.Interaction):
 
             name_section = f"{emoji} {tier} | {nick}"
             donation_section = f"{total:>7,}₮"
-            line = f"{name_section:<35} — {donation_section}"
+            line = f"{name_section:<47} — {donation_section:>10,}₮"
             lines.append(line)
 
         lines.append(separator)
