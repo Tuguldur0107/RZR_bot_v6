@@ -1577,7 +1577,7 @@ async def donator_list(interaction: discord.Interaction):
 
         header_line = "💰" * 24
         footer_line = "💖" * 24
-        separator = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        separator = "-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━-"
 
         lines = [f"```", header_line, separator]
 
