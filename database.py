@@ -69,11 +69,19 @@ async def insert_match(mode: str, teams: list, winner_team: list, initiator_id: 
     await conn.close()
 
 # 🧠 Сүүлийн match хадгалах
+
+
 async def save_last_match(winner_details, loser_details):
     conn = await connect()
-    await conn.execute(
-        "INSERT INTO last_match (timestamp, winners, losers) VALUES ($1, $2, $3)",
-        datetime.now(), winner_details, loser_details
+    await conn.execute("""
+        INSERT INTO last_match (timestamp, winners, losers, winner_details, loser_details)
+        VALUES ($1, $2, $3, $4, $5)
+    """,
+        datetime.now(),
+        [p["uid"] for p in winner_details],
+        [p["uid"] for p in loser_details],
+        json.dumps(winner_details),
+        json.dumps(loser_details)
     )
     await conn.close()
 
@@ -128,7 +136,6 @@ async def get_all_donators():
         }
         for row in rows
     }
-
 
 async def upsert_donator(uid: int, mnt: int):
     conn = await connect()
@@ -201,8 +208,6 @@ async def save_session_state(data: dict, allow_empty=False):
     await conn.close()
     #print("✅ session_state хадгалагдлаа.")
 
-
-
 async def load_session_state():
     try:
         conn = await connect()
@@ -230,8 +235,6 @@ async def load_session_state():
     except Exception as e:
         #print("❌ load_session_state алдаа:", e)
         return None
-
-
 
 async def clear_session_state():
     try:
