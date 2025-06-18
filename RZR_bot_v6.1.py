@@ -25,9 +25,6 @@ from database import (
     # 📊 Match
     save_last_match, get_last_match, insert_match, clear_last_match,
 
-    # 🧾 Score log
-    log_score_transaction,
-
     # 🛡 Session
     save_session_state, load_session_state, clear_session_state,
 
@@ -925,7 +922,6 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             member = guild.get_member(uid)
             data["username"] = member.display_name if member else "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
-            await log_score_transaction(uid, +1, data["score"], data["tier"], "set_match_result")
             await update_player_stats(uid, is_win=True)
             winner_details.append({
                 "uid": uid,
@@ -948,7 +944,6 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             member = guild.get_member(uid)
             data["username"] = member.display_name if member else "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
-            await log_score_transaction(uid, -1, data["score"], data["tier"], "set_match_result")
             await update_player_stats(uid, is_win=False)
             loser_details.append({
                 "uid": uid,
@@ -1120,7 +1115,6 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             member = guild.get_member(uid)
             data["username"] = member.display_name if member else "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
-            await log_score_transaction(uid, +2, data["score"], data["tier"], "fountain")
             await update_player_stats(uid, is_win=True)
             winner_details.append({
                 "uid": uid, "username": data["username"],
@@ -1140,7 +1134,6 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             member = guild.get_member(uid)
             data["username"] = member.display_name if member else "Unknown"
             await upsert_score(uid, data["score"], data["tier"], data["username"])
-            await log_score_transaction(uid, -2, data["score"], data["tier"], "fountain")
             await update_player_stats(uid, is_win=False)
             loser_details.append({
                 "uid": uid, "username": data["username"],
@@ -1333,7 +1326,6 @@ async def undo_last_match(interaction: discord.Interaction):
             member = guild.get_member(uid)
             username = member.display_name if member else "Unknown"
             await upsert_score(uid, old_score, old_tier, username)
-            await log_score_transaction(uid, 0, old_score, old_tier, reason="undo")
             changed_ids.append(uid)
         except Exception as e:
             print(f"❌ Undo fail uid:{uid} – {e}")
