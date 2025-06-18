@@ -281,6 +281,10 @@ async def update_nicknames_for_users(guild, user_ids: list):
         if not member:
             continue
 
+        # ⛔️ Bot өөрөөсөө адилхан буюу дээш role-той гишүүний нэрийг өөрчилж чадахгүй
+        if member.top_role >= guild.me.top_role:
+            continue
+
         data = await get_score(uid)
         if not data:
             continue
