@@ -12,6 +12,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncpg
 import openai
+import traceback
 
 # 🗄️ Local modules
 from database import (
@@ -1048,8 +1049,11 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     if current:
         chunks.append(current)
 
-    for chunk in chunks:
-        await interaction.followup.send(chunk)
+    try:
+        for chunk in chunks:
+            await interaction.followup.send(chunk)
+    except Exception:
+        traceback.print_exc()
 
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
