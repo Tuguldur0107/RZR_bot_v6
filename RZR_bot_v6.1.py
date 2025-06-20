@@ -923,12 +923,12 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
 
     try:
         print("✅ insert_match эхэлж байна...")
-        await save_last_match(winner_details, loser_details)
+        await save_last_match(winner_details or [], loser_details or [])
         await insert_match(
             timestamp=now,
             initiator_id=session.get("initiator_id", 0),
-            team_count=session.get("team_count", 2),
-            players_per_team=session.get("players_per_team", 5),
+            team_count=len(session.get("teams", [])),
+            players_per_team=max(len(team) for team in session.get("teams", [])) if session.get("teams") else 0,
             winners=[int(uid) for uid in winners],
             losers=[int(uid) for uid in losers],
             mode="manual",

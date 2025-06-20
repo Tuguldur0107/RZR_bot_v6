@@ -102,12 +102,13 @@ async def save_last_match(winner_details, loser_details):
         VALUES ($1, $2, $3, $4, $5)
     """,
         datetime.now(),
-        [p["uid"] for p in winner_details],
-        [p["uid"] for p in loser_details],
-        json.dumps(winner_details),
-        json.dumps(loser_details)
+        [p["uid"] for p in winner_details or []],
+        [p["uid"] for p in loser_details or []],
+        json.dumps(winner_details or []),
+        json.dumps(loser_details or [])
     )
     await conn.close()
+
 
 async def get_last_match():
     conn = await connect()
