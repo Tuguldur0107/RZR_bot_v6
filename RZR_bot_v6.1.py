@@ -1315,6 +1315,20 @@ async def undo_last_match(interaction: discord.Interaction):
         except Exception as e:
             print("⚠️ clear_last_match алдаа:", e)
 
+        # ✅ Matches-с устгах
+        try:
+            conn = await connect()
+            await conn.execute("""
+                DELETE FROM matches
+                WHERE timestamp = $1
+                AND initiator_id = $2
+                AND mode = 'manual'
+                AND strategy = 'NormalMatch'
+            """, last["timestamp"], session.get("initiator_id", 0))
+            await conn.close()
+        except Exception as e:
+            print("⚠️ matches-с устгах үед алдаа:", e)
+
         try:
             await update_nicknames_for_users(guild, changed_ids)
         except Exception as e:
