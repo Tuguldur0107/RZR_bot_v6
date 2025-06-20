@@ -60,13 +60,31 @@ async def log_score_transaction(uid: int, delta: int, total: int, tier: str, rea
     await conn.close()
 
 # 🏆 Match бүртгэх
-async def insert_match(mode: str, teams: list, winner_team: list, initiator_id: int):
+# 🏆 Match бүртгэх (шинэ хувилбар)
+async def insert_match(
+    timestamp: datetime,
+    initiator_id: int,
+    team_count: int,
+    players_per_team: int,
+    winners: list[int],
+    losers: list[int],
+    mode: str,
+    strategy: str,
+    notes: str = ""
+):
     conn = await connect()
     await conn.execute("""
-        INSERT INTO matches (timestamp, mode, teams, winner_team, initiator_id)
-        VALUES (NOW(), $1, $2, $3, $4)
-    """, mode, teams, winner_team, initiator_id)
+        INSERT INTO matches (
+            timestamp, initiator_id, team_count, players_per_team,
+            winners, losers, mode, strategy, notes
+        ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7, $8, $9
+        )
+    """, timestamp, initiator_id, team_count, players_per_team,
+         winners, losers, mode, strategy, notes)
     await conn.close()
+
 
 # 🧠 Сүүлийн match хадгалах
 
