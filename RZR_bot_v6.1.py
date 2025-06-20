@@ -35,8 +35,6 @@ from database import (
     get_shields, upsert_shield
 )
 
-
-
 # 🌐 ENV
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -55,21 +53,6 @@ MN_TZ = timezone(timedelta(hours=8))
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# 🎮 Session + Team
-# GAME_SESSION = {
-#     "active": False,
-#     "start_time": None,
-#     "last_win_time": None
-# }
-# TEAM_SETUP = {
-#     "initiator_id": None,
-#     "team_count": 2,
-#     "players_per_team": 5,
-#     "player_ids": [],
-#     "teams": [],
-#     "changed_players": []
-# }
-
 # ⚙️ Tier config (1-1 → 5-5)
 TIER_ORDER = [
     "5-5", "5-4", "5-3", "5-2", "5-1",
@@ -86,7 +69,6 @@ TIER_WEIGHT = {
     "4-1":  45, "4-2":  40, "4-3":  35, "4-4":  30, "4-5":  25,
     "5-1":  20, "5-2":  15, "5-3":  10, "5-4":   5, "5-5":   0
 }
-
 
 def calculate_weight(data):
     tier = data.get("tier", "4-1")
@@ -263,7 +245,6 @@ def get_donator_emoji(data):
         return "💸"
     else:
         return "💰"
-
 
 def clean_nickname(nick: str) -> str:
     if not nick:
@@ -1064,7 +1045,6 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     except Exception:
         traceback.print_exc()
 
-
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
     winner_teams="Ялсан багуудын дугаарууд (жишээ: 1 3)",
@@ -1847,7 +1827,6 @@ async def main():
 
     print("🚀 Bot эхлэх гэж байна...")
     await bot.start(TOKEN)
-
 
 if __name__ == "__main__":
     import asyncio

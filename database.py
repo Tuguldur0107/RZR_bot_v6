@@ -80,8 +80,17 @@ async def insert_match(
             $1, $2, $3, $4,
             $5, $6, $7, $8, $9
         )
-    """, timestamp, initiator_id, team_count, players_per_team,
-         winners, losers, mode, strategy, notes)
+    """,
+        timestamp,
+        initiator_id,
+        team_count,
+        players_per_team,
+        json.dumps(winners),  # ✅ Хөрвүүлэлт
+        json.dumps(losers),   # ✅ Хөрвүүлэлт
+        mode,
+        strategy,
+        notes
+    )
     await conn.close()
 
 
