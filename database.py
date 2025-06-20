@@ -4,8 +4,6 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 import json
-import traceback
-from database import connect
 
 DB_URL = os.getenv("DATABASE_URL")
 
@@ -61,8 +59,7 @@ async def log_score_transaction(uid: int, delta: int, total: int, tier: str, rea
     """, uid, delta, total, tier, reason)
     await conn.close()
 
-# 🏆 Match бүртгэх (шинэ хувилбар)
-# 🏆 Match бүртгэх (traceback + лог нэмсэн хувилбар)
+# 🏆 Match бүртгэх
 async def insert_match(
     timestamp: datetime,
     initiator_id: int,
@@ -74,24 +71,18 @@ async def insert_match(
     strategy: str,
     notes: str = ""
 ):
-    try:
-        print(f"✅ insert_match called with winners={winners}, losers={losers}")
-        conn = await connect()
-        await conn.execute("""
-            INSERT INTO matches (
-                timestamp, initiator_id, team_count, players_per_team,
-                winners, losers, mode, strategy, notes
-            ) VALUES (
-                $1, $2, $3, $4,
-                $5, $6, $7, $8, $9
-            )
-        """, timestamp, initiator_id, team_count, players_per_team,
-             winners, losers, mode, strategy, notes)
-        await conn.close()
-        print("✅ insert_match successfully inserted match row.")
-    except Exception as e:
-        print("❌ insert_match error:", e)
-        traceback.print_exc()
+    conn = await connect()
+    await conn.execute("""
+        INSERT INTO matches (
+            timestamp, initiator_id, team_count, players_per_team,
+            winners, losers, mode, strategy, notes
+        ) VALUES (
+            $1, $2, $3, $4,
+            $5, $6, $7, $8, $9
+        )
+    """, timestamp, initiator_id, team_count, players_per_team,
+         winners, losers, mode, strategy, notes)
+    await conn.close()
 
 
 # 🧠 Сүүлийн match хадгалах
