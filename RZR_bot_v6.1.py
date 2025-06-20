@@ -322,8 +322,17 @@ async def insert_match(
                 timestamp, initiator_id, team_count, players_per_team,
                 winners, losers, mode, strategy, notes
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        """, timestamp, initiator_id, team_count, players_per_team,
-             winners, losers, mode, strategy, notes)
+        """,
+            timestamp,
+            initiator_id,
+            team_count,
+            players_per_team,
+            json.dumps(winners),  # ✅ JSON хөрвүүлэлт
+            json.dumps(losers),   # ✅ JSON хөрвүүлэлт
+            mode,
+            strategy,
+            notes
+        )
 
 # ⏱ 24h session timeout
 async def session_timeout_checker():
@@ -770,7 +779,6 @@ async def go_bot(interaction: discord.Interaction):
     lines.append("\n" + ("🏅 Энэ match: **Ranked** ✅ (оноо тооцно)" if is_ranked else "⚠️ Энэ match: **Ranked биш** ❌"))
 
     await interaction.followup.send("".join(lines))
-    await interaction.followup.send("✅ Match бүртгэгдлээ.")
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 async def go_gpt(interaction: discord.Interaction):
@@ -854,7 +862,6 @@ async def go_gpt(interaction: discord.Interaction):
         lines.append(f"\n⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {mentions}")
 
     await interaction.followup.send("".join(lines))
-    await interaction.followup.send("✅ Match бүртгэгдлээ.")
 
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -967,20 +974,23 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         print("⚠️ nickname update error:", e)
 
     try:
+        print("✅ insert_match эхэлж байна...")
         await save_last_match(winner_details, loser_details)
         await insert_match(
             timestamp=now,
             initiator_id=session.get("initiator_id", 0),
             team_count=session.get("team_count", 2),
             players_per_team=session.get("players_per_team", 5),
-            winners=winners,
-            losers=losers,
+            winners=[int(uid) for uid in winners],
+            losers=[int(uid) for uid in losers],
             mode="manual",
             strategy="NormalMatch",
             notes="set_match_result"
         )
+        print("✅ insert_match амжилттай дууслаа")
     except Exception as e:
         print("❌ Match log алдаа:", e)
+
 
     session["last_win_time"] = now.isoformat()
     try:
