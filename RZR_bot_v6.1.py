@@ -932,7 +932,6 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         await clear_last_match()
         await save_last_match(winner_details or [], loser_details or [])
         await insert_match(
-            timestamp=now,
             initiator_id=session.get("initiator_id", 0),
             team_count=len(session.get("teams", [])),
             players_per_team=max(len(t) for t in session.get("teams", [])) if session.get("teams") else 0,

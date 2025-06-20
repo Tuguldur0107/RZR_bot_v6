@@ -63,7 +63,6 @@ async def log_score_transaction(uid: int, delta: int, total: int, tier: str, rea
 
 # 🏆 Match бүртгэх
 async def insert_match(
-    now,
     initiator_id,
     team_count,
     players_per_team,
@@ -74,6 +73,7 @@ async def insert_match(
     notes=""
 ):
     conn = await connect()
+    now = datetime.now(timezone.utc)  # ✅ энд дотор нь оруул
     await conn.execute("""
         INSERT INTO matches (
             timestamp, initiator_id, team_count, players_per_team,
