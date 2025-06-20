@@ -1,11 +1,13 @@
 # database.py
 import asyncpg
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 import json
 
 DB_URL = os.getenv("DATABASE_URL")
+
+now = datetime.now(timezone.utc)
 
 async def connect():
     return await asyncpg.connect(DB_URL)
@@ -64,6 +66,7 @@ async def insert_match(
     timestamp, initiator_id, team_count, players_per_team,
     winners, losers, mode, strategy, notes=""
 ):
+    timestamp=datetime.now(timezone.utc)
     conn = await connect()
     await conn.execute("""
         INSERT INTO matches (
