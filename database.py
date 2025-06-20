@@ -5,7 +5,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 import json
 import traceback
-from . import connect 
+from database import connect
 
 DB_URL = os.getenv("DATABASE_URL")
 
