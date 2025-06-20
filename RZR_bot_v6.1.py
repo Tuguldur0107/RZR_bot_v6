@@ -1333,7 +1333,6 @@ async def undo_last_match(interaction: discord.Interaction):
         print("❌ Match буцаах үед алдаа гарлаа:", e)
         await interaction.followup.send("❌ Match буцаах үед алдаа гарлаа.")
 
-
 @bot.tree.command(name="my_score", description="Таны оноо болон tier-г харуулна")
 async def my_score(interaction: discord.Interaction):
     try:
@@ -1732,21 +1731,20 @@ async def match_history(interaction: discord.Interaction):
     except discord.errors.InteractionResponded:
         return
 
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-
-    conn = psycopg2.connect(DATABASE_URL)
-    cur = conn.cursor(cursor_factory=RealDictCursor)
-
-    cur.execute("""
-        SELECT timestamp, mode, initiator_id, strategy, teams, winner_team
-        FROM matches
-        ORDER BY timestamp DESC
-        LIMIT 5;
-    """)
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    try:
+        conn = await connect()
+        rows = await conn.fetch("""
+            SELECT timestamp, mode, strategy, initiator_id, winners, losers
+            FROM matches
+            ORDER BY timestamp DESC
+            LIMIT 5
+        """)
+        await conn.close()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send("❌ Match унших үед алдаа гарлаа.")
+        return
 
     if not rows:
         await interaction.followup.send("📭 Match бүртгэл хоосон байна.")
@@ -1755,24 +1753,26 @@ async def match_history(interaction: discord.Interaction):
     lines = ["📜 **Сүүлийн Match-ууд:**"]
     for i, row in enumerate(rows, 1):
         ts = row["timestamp"]
-        dt = datetime.fromisoformat(str(ts)).astimezone(timezone(timedelta(hours=8)))
+        dt = ts.astimezone(timezone(timedelta(hours=8)))
         ts_str = dt.strftime("%Y-%m-%d %H:%M")
 
         mode = row["mode"]
-        strategy = row.get("strategy", "-")
-        initiator_id = row.get("initiator_id", None)
-        initiator_tag = f"<@{initiator_id}>" if initiator_id else "?"
-        teams = row["teams"]
-        winner = row.get("winner_team", None)
+        strategy = row["strategy"]
+        initiator = f"<@{row['initiator_id']}>"
+        winners = row["winners"] or []
+        losers = row["losers"] or []
 
-        lines.append(f"\n**#{i} | {mode.upper()} | 🧠 `{strategy}` | 🕓 {ts_str}** — {initiator_tag}")
+        win_str = ", ".join(f"<@{uid}>" for uid in winners)
+        lose_str = ", ".join(f"<@{uid}>" for uid in losers)
 
-        for t_idx, team in enumerate(teams, 1):
-            tag = "🏆" if winner == t_idx else "🎮"
-            players = ", ".join(f"<@{uid}>" for uid in team)
-            lines.append(f"{tag} Team {t_idx}: {players}")
+        lines.append(
+            f"\n**#{i} | {mode.upper()} | 🧠 `{strategy}` | 🕓 {ts_str}** — {initiator}\n"
+            f"🏆 Winner: {win_str}\n"
+            f"💀 Loser: {lose_str}"
+        )
 
     await interaction.followup.send("\n".join(lines))
+
 
 @bot.tree.command(name="resync", description="Slash командуудыг дахин бүртгэнэ (админ)")
 async def resync(interaction: discord.Interaction):
