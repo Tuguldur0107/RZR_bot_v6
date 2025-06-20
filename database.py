@@ -63,10 +63,16 @@ async def log_score_transaction(uid: int, delta: int, total: int, tier: str, rea
 
 # 🏆 Match бүртгэх
 async def insert_match(
-    initiator_id, team_count, players_per_team,
-    winners, losers, mode, strategy, notes=""
+    now,
+    initiator_id,
+    team_count,
+    players_per_team,
+    winners,
+    losers,
+    mode,
+    strategy,
+    notes=""
 ):
-    timestamp = datetime.now(timezone.utc)  # 🧠 энд timestamp-ыг тодорхойлно
     conn = await connect()
     await conn.execute("""
         INSERT INTO matches (
@@ -74,7 +80,7 @@ async def insert_match(
             winners, losers, mode, strategy, notes
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     """,
-        timestamp,
+        now,
         initiator_id,
         team_count,
         players_per_team,
@@ -85,6 +91,7 @@ async def insert_match(
         notes
     )
     await conn.close()
+
 
 
 # 🧠 Сүүлийн match хадгалах

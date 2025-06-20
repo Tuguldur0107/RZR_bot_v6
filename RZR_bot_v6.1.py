@@ -1267,12 +1267,9 @@ async def change_player(interaction: discord.Interaction, from_user: discord.Mem
 
 @bot.tree.command(name="undo_last_match", description="Сүүлд хийсэн match-ийн оноог буцаана")
 async def undo_last_match(interaction: discord.Interaction):
-    import traceback
-
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
-        print("❌ Interaction already responded.")
         return
 
     try:
@@ -1280,16 +1277,17 @@ async def undo_last_match(interaction: discord.Interaction):
         is_admin = interaction.user.guild_permissions.administrator
         is_initiator = interaction.user.id == session.get("initiator_id")
         if not (is_admin or is_initiator):
-            return await interaction.followup.send(
-                "⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн ажиллуулж чадна.", ephemeral=True
-            )
+            await interaction.followup.send("⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн ажиллуулж чадна.", ephemeral=True)
+            return
 
         last = await get_last_match()
         if not last:
-            return await interaction.followup.send("⚠️ Сүүлд бүртгэсэн match олдсонгүй.", ephemeral=True)
+            await interaction.followup.send("⚠️ Сүүлд бүртгэсэн match олдсонгүй.", ephemeral=True)
+            return
 
-        winner_details = last.get("winner_details", [])
-        loser_details = last.get("loser_details", [])
+        # 🧩 JSON parse
+        winner_details = json.loads(last.get("winner_details", "[]"))
+        loser_details = json.loads(last.get("loser_details", "[]"))
         guild = interaction.guild
         changed_ids = []
 
@@ -1301,14 +1299,9 @@ async def undo_last_match(interaction: discord.Interaction):
                 changed_ids.append(uid)
             except Exception as e:
                 print(f"❌ Undo fail uid:{uid} – {e}")
-                traceback.print_exc()
 
         for p in winner_details + loser_details:
-            try:
-                await restore_user(p["uid"], p["old_score"], p["old_tier"])
-            except Exception as e:
-                print("❌ restore_user алдаа:", e)
-                traceback.print_exc()
+            await restore_user(p["uid"], p["old_score"], p["old_tier"])
 
         try:
             for p in winner_details:
@@ -1317,19 +1310,16 @@ async def undo_last_match(interaction: discord.Interaction):
                 await update_player_stats(p["uid"], is_win=False, undo=True)
         except Exception as e:
             print("⚠️ player_stats undo алдаа:", e)
-            traceback.print_exc()
 
         try:
             await clear_last_match()
         except Exception as e:
             print("⚠️ clear_last_match алдаа:", e)
-            traceback.print_exc()
 
         try:
             await update_nicknames_for_users(guild, changed_ids)
         except Exception as e:
             print("⚠️ nickname update алдаа:", e)
-            traceback.print_exc()
 
         win_mentions = " ".join(f"<@{p['uid']}>" for p in winner_details)
         lose_mentions = " ".join(f"<@{p['uid']}>" for p in loser_details)
@@ -1340,10 +1330,8 @@ async def undo_last_match(interaction: discord.Interaction):
             f"💀 Loser-ууд: {lose_mentions}"
         )
         await interaction.followup.send("✅ Match бүртгэл цэвэрлэгдлээ.")
-
     except Exception as e:
-        print("❌ undo_last_match нийтлэг алдаа:", e)
-        traceback.print_exc()
+        print("❌ Match буцаах үед алдаа гарлаа:", e)
         await interaction.followup.send("❌ Match буцаах үед алдаа гарлаа.")
 
 
