@@ -874,32 +874,11 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
 
     if not (session.get("players_per_team") in [4, 5] and session.get("team_count", 0) >= 2):
         await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
-        # ✅ Оноо тооцохгүй ч match log бүртгэнэ
-        winners = [uid for i in win_indexes for uid in all_teams[i]]
-        losers = [uid for i in lose_indexes for uid in all_teams[i]]
-        now = datetime.now(timezone.utc)
-
-        try:
-            await save_last_match([], [])
-            await insert_match(
-                timestamp=now,
-                initiator_id=session.get("initiator_id", 0),
-                team_count=session.get("team_count", 2),
-                players_per_team=session.get("players_per_team", 5),
-                winners=winners,
-                losers=losers,
-                mode="manual",
-                strategy="InvalidMatch",
-                notes="set_match_result (оноо тооцоогүй)"
-            )
-        except Exception as e:
-            print("❌ Match log (оноо тооцоогүй) алдаа:", e)
-
         return
 
-    if not session.get("active") or not session.get("teams"):
-        await interaction.followup.send("⚠️ Session идэвхгүй эсвэл багууд бүрдээгүй байна.")
-        return
+    ranked = session.get("players_per_team") in [4, 5] and session.get("team_count", 0) >= 2
+    if not ranked:
+        await interaction.followup.send("ℹ️ Энэ match нь **Ranked биш** тул оноо, tier өөрчлөгдөхгүй. Гэхдээ бүртгэл хадгалагдана.")
 
     is_admin = interaction.user.guild_permissions.administrator
     is_initiator = interaction.user.id == session.get("initiator_id")
@@ -1074,6 +1053,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             await interaction.followup.send(chunk)
     except Exception:
         traceback.print_exc()
+
 
 @bot.tree.command(name="set_match_result_fountain", description="Fountain match бүртгэнэ, +2/-2 оноо, tier өөрчилнө")
 @app_commands.describe(
