@@ -63,9 +63,10 @@ async def log_score_transaction(uid: int, delta: int, total: int, tier: str, rea
 
 # 🏆 Match бүртгэх
 async def insert_match(
-    timestamp, initiator_id, team_count, players_per_team,
+    initiator_id, team_count, players_per_team,
     winners, losers, mode, strategy, notes=""
 ):
+    timestamp = datetime.now(timezone.utc)  # 🧠 энд timestamp-ыг тодорхойлно
     conn = await connect()
     await conn.execute("""
         INSERT INTO matches (
@@ -100,6 +101,7 @@ async def save_last_match(winner_details, loser_details):
         json.dumps(loser_details or [])
     )
     await conn.close()
+    print("✅ Winner Details:", winner_details)
 
 
 async def get_last_match():
