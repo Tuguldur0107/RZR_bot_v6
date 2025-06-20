@@ -1310,24 +1310,19 @@ async def undo_last_match(interaction: discord.Interaction):
         except Exception as e:
             print("⚠️ player_stats undo алдаа:", e)
 
+        # ✅ Matches-с хамгийн сүүлийн match-ийг id-аар нь устгана
+        try:
+            conn = await connect()
+            await conn.execute("DELETE FROM matches WHERE id = (SELECT MAX(id) FROM matches)")
+            await conn.close()
+        except Exception as e:
+            print("⚠️ matches-с устгах үед алдаа:", e)
+
+        # ✅ Last match clear
         try:
             await clear_last_match()
         except Exception as e:
             print("⚠️ clear_last_match алдаа:", e)
-
-        # ✅ Matches-с устгах
-        try:
-            conn = await connect()
-            await conn.execute("""
-                DELETE FROM matches
-                WHERE timestamp = $1
-                AND initiator_id = $2
-                AND mode = 'manual'
-                AND strategy = 'NormalMatch'
-            """, last["timestamp"], session.get("initiator_id", 0))
-            await conn.close()
-        except Exception as e:
-            print("⚠️ matches-с устгах үед алдаа:", e)
 
         try:
             await update_nicknames_for_users(guild, changed_ids)
@@ -1346,6 +1341,7 @@ async def undo_last_match(interaction: discord.Interaction):
     except Exception as e:
         print("❌ Match буцаах үед алдаа гарлаа:", e)
         await interaction.followup.send("❌ Match буцаах үед алдаа гарлаа.")
+
 
 @bot.tree.command(name="my_score", description="Таны оноо болон tier-г харуулна")
 async def my_score(interaction: discord.Interaction):
