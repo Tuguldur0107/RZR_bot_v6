@@ -874,6 +874,27 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
 
     if not (session.get("players_per_team") in [4, 5] and session.get("team_count", 0) >= 2):
         await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
+        # ✅ Оноо тооцохгүй ч match log бүртгэнэ
+        winners = [uid for i in win_indexes for uid in all_teams[i]]
+        losers = [uid for i in lose_indexes for uid in all_teams[i]]
+        now = datetime.now(timezone.utc)
+
+        try:
+            await save_last_match([], [])
+            await insert_match(
+                timestamp=now,
+                initiator_id=session.get("initiator_id", 0),
+                team_count=session.get("team_count", 2),
+                players_per_team=session.get("players_per_team", 5),
+                winners=winners,
+                losers=losers,
+                mode="manual",
+                strategy="InvalidMatch",
+                notes="set_match_result (оноо тооцоогүй)"
+            )
+        except Exception as e:
+            print("❌ Match log (оноо тооцоогүй) алдаа:", e)
+
         return
 
     if not session.get("active") or not session.get("teams"):
