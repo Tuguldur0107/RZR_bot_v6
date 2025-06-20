@@ -286,35 +286,6 @@ async def update_nicknames_for_users(guild, user_ids: list):
             print(f"⚠️ Nickname update алдаа: {uid} — {e}")
             traceback.print_exc()
 
-async def insert_match(
-    timestamp: datetime,
-    initiator_id: int,
-    team_count: int,
-    players_per_team: int,
-    winners: list,
-    losers: list,
-    mode: str,
-    strategy: str,
-    notes: str = ""
-):
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO matches (
-                timestamp, initiator_id, team_count, players_per_team,
-                winners, losers, mode, strategy, notes
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        """,
-            timestamp,
-            initiator_id,
-            team_count,
-            players_per_team,
-            json.dumps(winners),  # ✅ JSON хөрвүүлэлт
-            json.dumps(losers),   # ✅ JSON хөрвүүлэлт
-            mode,
-            strategy,
-            notes
-        )
-
 # ⏱ 24h session timeout
 async def session_timeout_checker():
     await bot.wait_until_ready()
@@ -858,10 +829,6 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     session = await load_session_state()
     if not session:
         await interaction.followup.send("⚠️ Session мэдээлэл олдсонгүй.")
-        return
-
-    if not (session.get("players_per_team") in [4, 5] and session.get("team_count", 0) >= 2):
-        await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
         return
 
     ranked = session.get("players_per_team") in [4, 5] and session.get("team_count", 0) >= 2
