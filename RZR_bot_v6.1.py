@@ -1303,12 +1303,12 @@ async def undo_last_match(interaction: discord.Interaction):
         await restore_user(p["uid"], p["old_score"], p["old_tier"])
 
     try:
-        await update_player_stats(
-            [p["uid"] for p in winner_details], is_win=True, undo=True
-        )
-        await update_player_stats(
-            [p["uid"] for p in loser_details], is_win=False, undo=True
-        )
+        for p in winner_details:
+            await update_player_stats(p["uid"], is_win=True, undo=True)
+
+        for p in loser_details:
+            await update_player_stats(p["uid"], is_win=False, undo=True)
+
     except Exception as e:
         print("⚠️ player_stats undo алдаа:", e)
 
