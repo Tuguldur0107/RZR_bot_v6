@@ -869,52 +869,58 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             data["tier"] = demote_tier(data["tier"])
             data["score"] = 0
         return data
-
+    
     winner_details, loser_details = [], []
-    if ranked:
-        for uid in winners:
-            try:
-                data = await get_score(uid) or get_default_tier()
-                old_score, old_tier = data["score"], data["tier"]
-                data["tier"] = validate_tier(data["tier"])
-                data = adjust_score(data, +1)
-                member = guild.get_member(uid)
-                data["username"] = member.display_name if member else "Unknown"
-                await upsert_score(uid, data["score"], data["tier"], data["username"])
-                await update_player_stats(uid, is_win=True)
-                winner_details.append({
-                    "uid": uid,
-                    "username": data["username"],
-                    "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
-                    "old_score": old_score,
-                    "new_score": data["score"],
-                    "old_tier": old_tier,
-                    "new_tier": data["tier"]
-                })
-            except Exception as e:
-                print(f"❌ Winner uid:{uid} update fail:", e)
 
-        for uid in losers:
-            try:
-                data = await get_score(uid) or get_default_tier()
-                old_score, old_tier = data["score"], data["tier"]
-                data["tier"] = validate_tier(data["tier"])
+    for uid in winners:
+        try:
+            data = await get_score(uid) or get_default_tier()
+            old_score, old_tier = data["score"], data["tier"]
+            data["tier"] = validate_tier(data["tier"])
+            member = guild.get_member(uid)
+            username = member.display_name if member else "Unknown"
+
+            if ranked:
+                data = adjust_score(data, +1)
+                await upsert_score(uid, data["score"], data["tier"], username)
+                await update_player_stats(uid, is_win=True)
+
+            winner_details.append({
+                "uid": uid,
+                "username": username,
+                "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
+                "old_score": old_score,
+                "new_score": data["score"],
+                "old_tier": old_tier,
+                "new_tier": data["tier"]
+            })
+        except Exception as e:
+            print(f"❌ Winner uid:{uid} update fail:", e)
+
+    for uid in losers:
+        try:
+            data = await get_score(uid) or get_default_tier()
+            old_score, old_tier = data["score"], data["tier"]
+            data["tier"] = validate_tier(data["tier"])
+            member = guild.get_member(uid)
+            username = member.display_name if member else "Unknown"
+
+            if ranked:
                 data = adjust_score(data, -1)
-                member = guild.get_member(uid)
-                data["username"] = member.display_name if member else "Unknown"
-                await upsert_score(uid, data["score"], data["tier"], data["username"])
+                await upsert_score(uid, data["score"], data["tier"], username)
                 await update_player_stats(uid, is_win=False)
-                loser_details.append({
-                    "uid": uid,
-                    "username": data["username"],
-                    "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
-                    "old_score": old_score,
-                    "new_score": data["score"],
-                    "old_tier": old_tier,
-                    "new_tier": data["tier"]
-                })
-            except Exception as e:
-                print(f"❌ Loser uid:{uid} update fail:", e)
+
+            loser_details.append({
+                "uid": uid,
+                "username": username,
+                "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
+                "old_score": old_score,
+                "new_score": data["score"],
+                "old_tier": old_tier,
+                "new_tier": data["tier"]
+            })
+        except Exception as e:
+            print(f"❌ Loser uid:{uid} update fail:", e)
 
     try:
         await update_nicknames_for_users(guild, [p["uid"] for p in winner_details + loser_details])
@@ -923,6 +929,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
 
     try:
         print("✅ insert_match эхэлж байна...")
+        await clear_last_match()
         await save_last_match(winner_details or [], loser_details or [])
         await insert_match(
             timestamp=now,

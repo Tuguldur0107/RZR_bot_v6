@@ -66,7 +66,6 @@ async def insert_match(
     timestamp, initiator_id, team_count, players_per_team,
     winners, losers, mode, strategy, notes=""
 ):
-    timestamp=datetime.now(timezone.utc)
     conn = await connect()
     await conn.execute("""
         INSERT INTO matches (
@@ -94,7 +93,7 @@ async def save_last_match(winner_details, loser_details):
         INSERT INTO last_match (timestamp, winners, losers, winner_details, loser_details)
         VALUES ($1, $2, $3, $4, $5)
     """,
-        datetime.now(),
+        datetime.now(timezone.utc),  # ✅ timezone бүхий datetime
         json.dumps([p["uid"] for p in winner_details]),
         json.dumps([p["uid"] for p in loser_details]),
         json.dumps(winner_details or []),
