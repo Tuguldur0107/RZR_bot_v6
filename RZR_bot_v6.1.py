@@ -1030,13 +1030,13 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         return
 
     session = await load_session_state()
-    if not session or not session.get("active") or not session.get("teams"):
-        await interaction.followup.send("⚠️ Session идэвхгүй эсвэл багууд бүрдээгүй байна.")
+    if not session:
+        await interaction.followup.send("⚠️ Session мэдээлэл олдсонгүй.")
         return
 
-    if not (session.get("players_per_team") in [4, 5] and session.get("team_count", 0) >= 2):
-        await interaction.followup.send("⚠️ Энэ match нь 4v4/5v5 биш тул оноо тооцохгүй.")
-        return
+    ranked = session.get("players_per_team") in [4, 5] and session.get("team_count", 0) >= 2
+    if not ranked:
+        await interaction.followup.send("ℹ️ Энэ match нь **Ranked биш** тул оноо, tier өөрчлөгдөхгүй. Гэхдээ бүртгэл хадгалагдана.")
 
     is_admin = interaction.user.guild_permissions.administrator
     is_initiator = interaction.user.id == session.get("initiator_id")
@@ -1079,13 +1079,16 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             data = await get_score(uid) or get_default_tier()
             old_score, old_tier = data["score"], data["tier"]
             data["tier"] = validate_tier(data["tier"])
-            data = adjust_score(data, +2)
             member = guild.get_member(uid)
-            data["username"] = member.display_name if member else "Unknown"
-            await upsert_score(uid, data["score"], data["tier"], data["username"])
-            await update_player_stats(uid, is_win=True)
+            username = member.display_name if member else "Unknown"
+
+            if ranked:
+                data = adjust_score(data, +2)
+                await upsert_score(uid, data["score"], data["tier"], username)
+                await update_player_stats(uid, is_win=True)
+
             winner_details.append({
-                "uid": uid, "username": data["username"],
+                "uid": uid, "username": username,
                 "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
                 "old_score": old_score, "new_score": data["score"],
                 "old_tier": old_tier, "new_tier": data["tier"]
@@ -1098,13 +1101,16 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
             data = await get_score(uid) or get_default_tier()
             old_score, old_tier = data["score"], data["tier"]
             data["tier"] = validate_tier(data["tier"])
-            data = adjust_score(data, -2)
             member = guild.get_member(uid)
-            data["username"] = member.display_name if member else "Unknown"
-            await upsert_score(uid, data["score"], data["tier"], data["username"])
-            await update_player_stats(uid, is_win=False)
+            username = member.display_name if member else "Unknown"
+
+            if ranked:
+                data = adjust_score(data, -2)
+                await upsert_score(uid, data["score"], data["tier"], username)
+                await update_player_stats(uid, is_win=False)
+
             loser_details.append({
-                "uid": uid, "username": data["username"],
+                "uid": uid, "username": username,
                 "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
                 "old_score": old_score, "new_score": data["score"],
                 "old_tier": old_tier, "new_tier": data["tier"]
@@ -1118,12 +1124,12 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         print("⚠️ nickname update error:", e)
 
     try:
-        await save_last_match(winner_details, loser_details)
+        await clear_last_match()
+        await save_last_match(winner_details or [], loser_details or [])
         await insert_match(
-            timestamp=now,
             initiator_id=session.get("initiator_id", 0),
-            team_count=session.get("team_count", 2),
-            players_per_team=session.get("players_per_team", 5),
+            team_count=len(session.get("teams", [])),
+            players_per_team=max(len(t) for t in session.get("teams", [])) if session.get("teams") else 0,
             winners=winners,
             losers=losers,
             mode="manual",
@@ -1132,6 +1138,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         )
     except Exception as e:
         print("❌ Match log алдаа:", e)
+        traceback.print_exc()
 
     session["last_win_time"] = now.isoformat()
     try:
@@ -1139,56 +1146,40 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
     except Exception as e:
         print("❌ session save алдаа:", e)
 
+    # ✅ Message render
     win_str = ", ".join(f"{i+1}-р баг" for i in win_indexes)
     lose_str = ", ".join(f"{i+1}-р баг" for i in lose_indexes)
     lines = [f"💦 {win_str} Fountain ялж {lose_str} ялагдлаа.\nОноо, Tier шинэчлэгдлээ."]
+
+    def render_line(p, symbol):
+        old_tier, new_tier = p.get("old_tier", "4-1"), p.get("new_tier", "4-1")
+        old_score, new_score = p.get("old_score", 0), p.get("new_score", 0)
+        uid = p["uid"]
+        if old_tier not in TIER_ORDER or new_tier not in TIER_ORDER:
+            return None
+        change = "⬆" if TIER_ORDER.index(new_tier) < TIER_ORDER.index(old_tier) else (
+                 "⬇" if TIER_ORDER.index(new_tier) > TIER_ORDER.index(old_tier) else "")
+        return f"- <@{uid}>: `{old_score} → {new_score}` (Tier: `{old_tier} → {new_tier}`) {change}"
 
     if winner_details:
         lines.append("")
         lines.append("✅ **Ялсан тоглогчид:**")
         for p in winner_details:
-            try:
-                old_tier = p.get("old_tier", "4-1")
-                new_tier = p.get("new_tier", "4-1")
-                old_score = p.get("old_score", 0)
-                new_score = p.get("new_score", 0)
-                uid = p["uid"]
-
-                if old_tier not in TIER_ORDER or new_tier not in TIER_ORDER:
-                    print(f"⚠️ Tier алдаа: uid={uid}, old={old_tier}, new={new_tier}")
-                    continue
-
-                change = "⬆" if TIER_ORDER.index(new_tier) < TIER_ORDER.index(old_tier) else (
-                        "⬇" if TIER_ORDER.index(new_tier) > TIER_ORDER.index(old_tier) else "")
-
-                lines.append(f"- <@{uid}>: `{old_score} → {new_score}` (Tier: `{old_tier} → {new_tier}`) {change}")
-            except Exception as e:
-                print("❌ winner_details render алдаа:", e)
+            line = render_line(p, "✅")
+            if line:
+                lines.append(line)
 
     if loser_details:
         lines.append("")
         lines.append("💀 **Ялагдсан тоглогчид:**")
         for p in loser_details:
-            try:
-                old_tier = p.get("old_tier", "4-1")
-                new_tier = p.get("new_tier", "4-1")
-                old_score = p.get("old_score", 0)
-                new_score = p.get("new_score", 0)
-                uid = p["uid"]
-
-                if old_tier not in TIER_ORDER or new_tier not in TIER_ORDER:
-                    print(f"⚠️ Tier алдаа: uid={uid}, old={old_tier}, new={new_tier}")
-                    continue
-
-                change = "⬆" if TIER_ORDER.index(new_tier) < TIER_ORDER.index(old_tier) else (
-                        "⬇" if TIER_ORDER.index(new_tier) > TIER_ORDER.index(old_tier) else "")
-
-                lines.append(f"- <@{uid}>: `{old_score} → {new_score}` (Tier: `{old_tier} → {new_tier}`) {change}")
-            except Exception as e:
-                print("❌ loser_details render алдаа:", e)
+            line = render_line(p, "💀")
+            if line:
+                lines.append(line)
 
     lines.append("✅ Match бүртгэгдлээ.")
-        # ✅ Хэт урт мессежийг хэсэгчилж илгээнэ
+
+    # ✅ Хэт урт мессежийг хэсэгчилж илгээнэ
     chunks = []
     current = ""
     for line in lines:
@@ -1201,6 +1192,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
 
     for chunk in chunks:
         await interaction.followup.send(chunk)
+
 
 @bot.tree.command(name="change_player", description="Багийн гишүүдийг солих")
 @app_commands.describe(
@@ -1341,7 +1333,6 @@ async def undo_last_match(interaction: discord.Interaction):
     except Exception as e:
         print("❌ Match буцаах үед алдаа гарлаа:", e)
         await interaction.followup.send("❌ Match буцаах үед алдаа гарлаа.")
-
 
 @bot.tree.command(name="my_score", description="Таны оноо болон tier-г харуулна")
 async def my_score(interaction: discord.Interaction):
