@@ -13,6 +13,6 @@ Rules:
 - Try to minimize the total power difference between teams.
 
 Return only a valid JSON object using the following format:
-{"teams": [[123,456,789], [234,567,890]]}
+{{"teams": [[123,456,789], [234,567,890]]}}
 
 Do not include any extra text, explanation, markdown, comments, or formatting.
