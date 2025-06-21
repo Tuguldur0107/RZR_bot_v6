@@ -773,6 +773,7 @@ async def go_gpt(interaction: discord.Interaction):
         teams = await call_gpt_balance_api(team_count, players_per_team, selected_players)
     except Exception as e:
         print("❌ GPT API error:", e)
+        traceback.print_exc()  # ← энэ мөрийг нэм
         await interaction.followup.send(
             "⚠️ GPT-ээр баг хуваарилах үед алдаа гарлаа. Түр зуурын асуудал байж болзошгүй.\n"
             "⏳ Дараа дахин оролдоно уу эсвэл `/go_bot` командыг ашиглаарай."
