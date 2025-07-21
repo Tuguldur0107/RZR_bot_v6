@@ -223,21 +223,19 @@ def get_donator_emoji(data):
     last_donated = data.get("last_donated")
 
     if not last_donated:
-        return None
+        return ""
 
     try:
         donated_time = last_donated if isinstance(last_donated, datetime) else datetime.fromisoformat(str(last_donated))
-        # 🛡️ Timezone-гүй байвал UTC болгож тохируулна
         if donated_time.tzinfo is None:
             donated_time = donated_time.replace(tzinfo=timezone.utc)
     except Exception as e:
         print("❌ Emoji parse fail:", e)
-        return None
+        return ""
 
     now = datetime.now(timezone.utc)
-
     if (now - donated_time).days > 30:
-        return None
+        return ""
 
     if total >= 30000:
         return "👑"
@@ -1193,7 +1191,6 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
 
     for chunk in chunks:
         await interaction.followup.send(chunk)
-
 
 @bot.tree.command(name="change_player", description="Багийн гишүүдийг солих")
 @app_commands.describe(
