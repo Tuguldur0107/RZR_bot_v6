@@ -459,7 +459,7 @@ async def show_added_players(interaction: discord.Interaction):
 @bot.tree.command(name="remove", description="Тоглогч өөрийгөө бүртгэлээс хасна")
 async def remove(interaction: discord.Interaction):
     try:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
 
@@ -504,7 +504,7 @@ async def remove_user(interaction: discord.Interaction, mention: str):
         return
 
     try:
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
 
