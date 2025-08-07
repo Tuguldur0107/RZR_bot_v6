@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import json
-from database import log_score_result
+
 
 DB_URL = os.getenv("DATABASE_URL")
 
