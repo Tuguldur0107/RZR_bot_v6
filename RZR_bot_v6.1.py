@@ -308,22 +308,26 @@ async def get_performance_emoji(uid: int) -> str:
             rows = await conn.fetch(
                 """
                 SELECT result FROM score_log
-                WHERE uid = $1 AND timestamp >= NOW() - INTERVAL '12 HOURS'
+                WHERE uid = $1 --AND timestamp >= NOW() - INTERVAL '12 HOURS'
                 """,
                 uid
             )
-        score = sum(1 if r["result"] == "win" else -1 for r in rows)
 
-        print(f"📊 UID={uid} | wins/loss rows={len(rows)} | score={score}")
+        performance_score = sum(1 if r["result"] == "win" else -1 for r in rows)
 
-        if score > 0:
-            return "✅" * score
-        elif score < 0:
-            return "❌" * abs(score)
+        print(f"📊 UID={uid} | rows={len(rows)} | performance_score={performance_score}")
+
+        if performance_score > 0:
+            return "✅" * performance_score
+        elif performance_score < 0:
+            return "❌" * abs(performance_score)
         return ""
+
     except Exception as e:
         print(f"⚠️ get_performance_emoji алдаа: {uid}", e)
         return ""
+
+
 
 
 
@@ -359,7 +363,7 @@ async def session_timeout_checker():
 async def on_ready():
     print(f"🤖 Bot нэвтэрлээ: {bot.user}")
     print("📁 Working directory:", os.getcwd())
-
+    await init_pool() 
     # ⚙️ Slash командуудыг global sync хийнэ
     await bot.tree.sync()
 
