@@ -247,8 +247,11 @@ def get_donator_emoji(data):
 def clean_nickname(nick: str) -> str:
     if not nick:
         return ""
-    if " | " in nick:
-        return nick.split(" | ")[-1].strip()
+    parts = nick.split(" | ")
+    if len(parts) == 3:
+        return parts[1].strip()  # base_nick
+    elif len(parts) == 2:
+        return parts[1].strip()
     return nick.strip()
 
 # 🧠 nickname-г оноо + tier + emoji-гаар шинэчлэх
@@ -276,13 +279,47 @@ async def update_nicknames_for_users(guild, user_ids: list):
         emoji = get_donator_emoji(donor_data) if donor_data else ""
 
         prefix = f"{emoji} {tier}".strip()
-        new_nick = f"{prefix} | {base_nick}"
+        # new_nick = f"{prefix} | {base_nick}"
+
+        performance_emoji = await get_performance_emoji(uid)
+        new_nick = f"{prefix} | {base_nick} | {performance_emoji}".strip()
 
         try:
             await member.edit(nick=new_nick)
         except Exception as e:
             print(f"⚠️ Nickname update алдаа: {uid} — {e}")
             traceback.print_exc()
+
+async def log_score_result(uid: int, result: str):
+    assert result in ["win", "loss"], "Invalid result"
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO score_log (uid, result) VALUES ($1, $2)",
+                uid, result
+            )
+    except Exception as e:
+        print(f"❌ log_score_result алдаа: {uid}, {result}", e)
+
+async def get_performance_emoji(uid: int) -> str:
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT result FROM score_log
+                WHERE uid = $1 AND timestamp >= NOW() - INTERVAL '12 HOURS'
+                """,
+                uid
+            )
+        score = sum(1 if r["result"] == "win" else -1 for r in rows)
+        if score > 0:
+            return "🏆" * score
+        elif score < 0:
+            return "💀" * abs(score)
+        return ""
+    except Exception as e:
+        print(f"⚠️ get_performance_emoji алдаа: {uid}", e)
+        return ""
 
 # ⏱ 24h session timeout
 async def session_timeout_checker():
@@ -881,6 +918,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
                 data = adjust_score(data, +1)
                 await upsert_score(uid, data["score"], data["tier"], username)
                 await update_player_stats(uid, is_win=True)
+                await log_score_result(uid, "win")  # ⬅️ нэмэх
 
             winner_details.append({
                 "uid": uid,
@@ -906,6 +944,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
                 data = adjust_score(data, -1)
                 await upsert_score(uid, data["score"], data["tier"], username)
                 await update_player_stats(uid, is_win=False)
+                await log_score_result(uid, "loss")  # ⬅️ нэмэх
 
             loser_details.append({
                 "uid": uid,
@@ -1083,6 +1122,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
                 data = adjust_score(data, +2)
                 await upsert_score(uid, data["score"], data["tier"], username)
                 await update_player_stats(uid, is_win=True)
+                await log_score_result(uid, "win")  # ⬅️ нэмэх
 
             winner_details.append({
                 "uid": uid, "username": username,
@@ -1105,6 +1145,7 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
                 data = adjust_score(data, -2)
                 await upsert_score(uid, data["score"], data["tier"], username)
                 await update_player_stats(uid, is_win=False)
+                await log_score_result(uid, "loss")  # ⬅️ нэмэх
 
             loser_details.append({
                 "uid": uid, "username": username,
