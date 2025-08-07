@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import json
+from database import log_score_result
 
 DB_URL = os.getenv("DATABASE_URL")
 
@@ -51,6 +52,17 @@ async def upsert_score(uid: int, score: int, tier: str, username: str):
     await conn.close()
 
 from datetime import datetime
+
+async def log_score_result(uid: int, result: str):
+    assert result in ["win", "loss"], "Invalid result"
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO score_log (uid, result) VALUES ($1, $2)",
+                uid, result
+            )
+    except Exception as e:
+        print(f"❌ log_score_result алдаа: {uid}, {result}", e)
 
 # 🧾 Онооны өөрчлөлт бүрийг score_log руу хадгалах
 async def log_score_transaction(uid: int, delta: int, total: int, tier: str, reason: str):

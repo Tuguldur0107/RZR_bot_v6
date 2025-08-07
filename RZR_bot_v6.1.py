@@ -14,6 +14,7 @@ import asyncpg
 import openai
 import traceback
 
+
 # 🗄️ Local modules
 from database import (
     connect, pool, init_pool,
@@ -30,6 +31,8 @@ from database import (
 
     # 💖 Donator
     get_all_donators, upsert_donator,
+
+    log_score_result,
 
     # 🛡 Shields
     get_shields, upsert_shield
@@ -290,17 +293,6 @@ async def update_nicknames_for_users(guild, user_ids: list):
             print(f"⚠️ Nickname update алдаа: {uid} — {e}")
             traceback.print_exc()
 
-async def log_score_result(uid: int, result: str):
-    assert result in ["win", "loss"], "Invalid result"
-    try:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO score_log (uid, result) VALUES ($1, $2)",
-                uid, result
-            )
-    except Exception as e:
-        print(f"❌ log_score_result алдаа: {uid}, {result}", e)
-
 async def get_performance_emoji(uid: int) -> str:
     try:
         async with pool.acquire() as conn:
@@ -347,8 +339,6 @@ async def session_timeout_checker():
                     print("🔚 Session автоматаар хаагдлаа (24h).")
             except Exception as e:
                 print("⚠️ session_timeout_checker parse алдаа:", e)
-
-
 
 # 🧬 Start
 @bot.event
