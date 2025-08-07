@@ -346,29 +346,26 @@ async def initialize_bot():
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message("🏓 Pong!")
 
-@bot.tree.command(name="start_match", description="Session эхлүүлнэ, багийн тоо болон тоглогчийн тоог тохируулна")
-@app_commands.describe(team_count="Хэдэн багтай байх вэ", players_per_team="Нэг багт хэдэн хүн байх вэ")
-async def start_match(interaction: discord.Interaction, team_count: int, players_per_team: int):
+@bot.tree.command(name="start_match", description="Session эхлүүлнэ (шинэ тоглолтын session)")
+async def start_match(interaction: discord.Interaction):
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
-    # ✅ өмнөх session цэвэрлэх хэсэг
     try:
         await clear_session_state()
         print("🧼 өмнөх session_state устлаа.")
     except Exception as e:
         print("❌ clear_session_state алдаа:", e)
+
     try:
         now = datetime.now(timezone.utc)
 
         await save_session_state({
             "active": True,
-            "start_time": now,             # ❗️ as datetime object
-            "last_win_time": now,         # ❗️ as datetime object
+            "start_time": now,
+            "last_win_time": now,
             "initiator_id": interaction.user.id,
-            "team_count": team_count,
-            "players_per_team": players_per_team,
             "player_ids": [],
             "teams": [],
             "changed_players": [],
@@ -376,7 +373,7 @@ async def start_match(interaction: discord.Interaction, team_count: int, players
         }, allow_empty=True)
 
         await interaction.followup.send(
-            f"🟢 {team_count} багтай, {players_per_team} хүнтэй Session эхэллээ. `addme` коммандаар тоглогчид бүртгүүлнэ үү."
+            "🟢 Session эхэллээ. `addme` коммандаар тоглогчид бүртгүүлнэ үү."
         )
 
     except Exception as e:
@@ -644,7 +641,8 @@ async def clear_match(interaction: discord.Interaction):
         await interaction.followup.send("⚠️ Session цэвэрлэх үед алдаа гарлаа.")
 
 @bot.tree.command(name="go_bot", description="Онооны дагуу тэнцвэртэй баг хуваарилна")
-async def go_bot(interaction: discord.Interaction):
+@app_commands.describe(team_count="Хэдэн багтай байх вэ", players_per_team="Нэг багт хэдэн хүн байх вэ")
+async def go_bot(interaction: discord.Interaction, team_count: int, players_per_team: int):
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
@@ -661,8 +659,6 @@ async def go_bot(interaction: discord.Interaction):
         await interaction.followup.send("⛔️ Зөвхөн админ эсвэл session эхлүүлсэн хүн ажиллуулж чадна.", ephemeral=True)
         return
 
-    team_count = session.get("team_count", 2)
-    players_per_team = session.get("players_per_team", 5)
     total_slots = team_count * players_per_team
     player_ids = session.get("player_ids", [])
 
@@ -695,6 +691,8 @@ async def go_bot(interaction: discord.Interaction):
     strategy, (best_teams, best_diff) = min(strategy_diffs.items(), key=lambda x: x[1][1])
 
     # 💾 Session хадгалах
+    session["team_count"] = team_count
+    session["players_per_team"] = players_per_team
     session["teams"] = best_teams
     session["strategy"] = strategy
     session["last_win_time"] = datetime.now(timezone.utc).isoformat()
