@@ -304,6 +304,9 @@ async def get_performance_emoji(uid: int) -> str:
                 uid
             )
         score = sum(1 if r["result"] == "win" else -1 for r in rows)
+
+        print(f"📊 UID={uid} | wins/loss rows={len(rows)} | score={score}")
+
         if score > 0:
             return "🏆" * score
         elif score < 0:
@@ -312,6 +315,8 @@ async def get_performance_emoji(uid: int) -> str:
     except Exception as e:
         print(f"⚠️ get_performance_emoji алдаа: {uid}", e)
         return ""
+
+
 
 # ⏱ 24h session timeout
 async def session_timeout_checker():
