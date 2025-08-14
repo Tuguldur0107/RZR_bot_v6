@@ -365,6 +365,7 @@ async def on_ready():
     print(f"🤖 Bot нэвтэрлээ: {bot.user}")
     print("📁 Working directory:", os.getcwd())
     await init_pool() 
+    print("✅ DB pool амжилттай эхэллээ.")
     # ⚙️ Slash командуудыг global sync хийнэ
     await bot.tree.sync()
 
