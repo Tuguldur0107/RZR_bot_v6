@@ -16,6 +16,7 @@ async def connect():
 # database.py файлд дараах функцуудыг нэм:
 
 load_dotenv()
+
 pool = None
 
 async def init_pool():

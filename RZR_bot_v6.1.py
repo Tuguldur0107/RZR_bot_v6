@@ -261,16 +261,33 @@ def clean_nickname(nick: str) -> str:
 async def update_nicknames_for_users(guild, user_ids: list):
     donors = await get_all_donators()
 
+    MAX_NICK = 32
+
+    def build_nick(donor_emoji: str, tier: str, base: str, perf: str) -> str:
+        left = f"{(donor_emoji + ' ') if donor_emoji else ''}{tier} | "
+        right = f" | {perf}" if perf else ""
+        room = MAX_NICK - len(left) - len(right)
+        room = max(room, 1)
+        clean = base.strip()
+        if len(clean) > room:
+            ellipsis = "…"
+            # хамгийн багадаа 1 тэмдэгт + …
+            cut = max(room - len(ellipsis), 1)
+            clean = clean[:cut] + ellipsis
+        return f"{left}{clean}{right}"
+
     for uid in user_ids:
         member = guild.get_member(uid)
         if not member:
             continue
 
-        # ⛔️ Bot өөрөөсөө адилхан буюу дээш role-той гишүүний нэрийг өөрчилж чадахгүй
-        if member.top_role >= guild.me.top_role:
+        # Role hierarchy хамгаалалт (алдаа залгиж continue)
+        try:
+            if member.top_role >= guild.me.top_role:
+                continue
+        except Exception:
             continue
 
-        # 📊 Оноо, tier мэдээлэл авна
         data = await get_score(uid)
         if not data:
             continue
@@ -278,24 +295,20 @@ async def update_nicknames_for_users(guild, user_ids: list):
         tier = data.get("tier", "4-1")
         base_nick = clean_nickname(member.display_name)
 
-        # 💖 Donator emoji
         donor_data = donors.get(str(uid))
         donor_emoji = get_donator_emoji(donor_data) if donor_data else ""
 
-        # 🎯 Win/loss emoji (performance)
-        performance_emoji = await get_performance_emoji(uid)
+        # Performance emoji-г аюулгүй авч чаддаг
+        try:
+            perf = await get_performance_emoji(uid)
+        except Exception as e:
+            print(f"⚠️ perf emoji fail uid={uid}: {e}")
+            perf = ""
 
-        # 🧱 Nickname format: 🧡 3-1 | Хэн нэгэн | ✅✅
-        prefix = f"{donor_emoji} {tier}".strip()
-        new_nick = f"{prefix} | {base_nick} | {performance_emoji}".strip()
+        new_nick = build_nick(donor_emoji, tier, base_nick, perf)
 
-        # ⛔️ 32 тэмдэгт хэтэрвэл base nickname-аа тайрах
-        MAX_LEN = 32
-        if len(new_nick) > MAX_LEN:
-            excess = len(new_nick) - MAX_LEN
-            allowed_base_len = max(len(base_nick) - excess, 0)
-            base_nick = base_nick[:allowed_base_len]
-            new_nick = f"{prefix} | {base_nick} | {performance_emoji}".strip()
+        if member.display_name == new_nick:
+            continue  # илүүц edit хийхгүй
 
         try:
             await member.edit(nick=new_nick)
@@ -305,40 +318,57 @@ async def update_nicknames_for_users(guild, user_ids: list):
             traceback.print_exc()
 
 
+async def ensure_pool() -> bool:
+    """
+    Pool байхгүй бол init_pool() дуудаад True буцаана.
+    Амжилтгүй бол False — энэ үед connect() fallback ашиглана.
+    """
+    try:
+        if pool is None:
+            print("ℹ️ ensure_pool: initializing pool…")
+            await init_pool()  # database.py
+        return True
+    except Exception as e:
+        print(f"⚠️ ensure_pool error: {e}")
+        return False
 
 async def get_performance_emoji(uid: int) -> str:
+    SQL = """
+        SELECT result
+        FROM score_log
+        WHERE uid = $1
+          AND timestamp >= NOW() - INTERVAL '12 HOURS'
+    """
+    rows = []
     try:
-        global pool
-        if pool is None:
-            print("🚨 get_performance_emoji: pool is None, initializing...")
-            await init_pool()
-
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT result FROM score_log
-                WHERE uid = $1 AND timestamp >= NOW() - INTERVAL '12 HOURS'
-                """,
-                uid
-            )
-
-        performance_score = sum(1 if r["result"] == "win" else -1 for r in rows)
-        print(f"📊 UID={uid} | rows={len(rows)} | performance_score={performance_score}")
-
-        if performance_score > 0:
-            return "✅" * performance_score
-        elif performance_score < 0:
-            return "❌" * abs(performance_score)
-        return ""
-
+        ok = await ensure_pool()
+        if ok and pool:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(SQL, uid)
+        else:
+            # Fallback — шууд нэг удаагийн connect
+            conn = await connect()
+            try:
+                rows = await conn.fetch(SQL, uid)
+            finally:
+                await conn.close()
     except Exception as e:
-        print(f"⚠️ get_performance_emoji алдаа: {uid} — {e}")
+        print(f"⚠️ get_performance_emoji error uid={uid}: {e}")
         return ""
 
+    perf = 0
+    for r in rows:
+        res = r.get("result") if isinstance(r, dict) else r["result"]
+        if res == "win":
+            perf += 1
+        elif res == "loss":
+            perf -= 1
 
-
-
-
+    if perf > 0:
+        return "✅" * min(perf, 3)   # cap to 3, уртыг хэтрүүлэхгүй
+    if perf < 0:
+        return "❌" * min(-perf, 3)
+    return ""
 
 # ⏱ 24h session timeout
 async def session_timeout_checker():
