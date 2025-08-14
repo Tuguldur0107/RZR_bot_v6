@@ -332,43 +332,57 @@ async def ensure_pool() -> bool:
         print(f"⚠️ ensure_pool error: {e}")
         return False
 
+# Хүсвэл global-config маягаар тавьж болно:
+PERF_EMOJI_CAP = None  # None = хязгааргүй; жишээ нь 10 гэж өгвөл 10 хүртэл хязгаарлана.
+
 async def get_performance_emoji(uid: int) -> str:
-    SQL = """
+    query = """
         SELECT result
         FROM score_log
-        WHERE uid = $1
-          AND timestamp >= NOW() - INTERVAL '12 HOURS'
+        WHERE uid = $1 AND timestamp >= NOW() - INTERVAL '12 HOURS'
     """
+
+    conn = None
     rows = []
     try:
-        ok = await ensure_pool()
-        if ok and pool:
-            async with pool.acquire() as conn:
-                rows = await conn.fetch(SQL, uid)
+        try:
+            used_pool = await ensure_pool()
+        except Exception:
+            used_pool = False
+
+        if used_pool and pool is not None:
+            async with pool.acquire() as aconn:
+                rows = await aconn.fetch(query, uid)
         else:
-            # Fallback — шууд нэг удаагийн connect
             conn = await connect()
-            try:
-                rows = await conn.fetch(SQL, uid)
-            finally:
-                await conn.close()
-    except Exception as e:
-        print(f"⚠️ get_performance_emoji error uid={uid}: {e}")
+            rows = await conn.fetch(query, uid)
+
+        perf = 0
+        for r in rows:
+            res = r["result"]
+            if res == "win":
+                perf += 1
+            elif res == "loss":
+                perf -= 1
+
+        if perf > 0:
+            count = perf if PERF_EMOJI_CAP is None else min(perf, PERF_EMOJI_CAP)
+            return "✅" * count
+        elif perf < 0:
+            count = (-perf) if PERF_EMOJI_CAP is None else min(-perf, PERF_EMOJI_CAP)
+            return "❌" * count
         return ""
 
-    perf = 0
-    for r in rows:
-        res = r.get("result") if isinstance(r, dict) else r["result"]
-        if res == "win":
-            perf += 1
-        elif res == "loss":
-            perf -= 1
+    except Exception as e:
+        print(f"⚠️ get_performance_emoji алдаа: {uid} — {e}")
+        return ""
+    finally:
+        if conn is not None:
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
-    if perf > 0:
-        return "✅" * min(perf)   # cap to 3, уртыг хэтрүүлэхгүй
-    if perf < 0:
-        return "❌" * min(-perf)
-    return ""
 
 # ⏱ 24h session timeout
 async def session_timeout_checker():
