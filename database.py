@@ -65,12 +65,18 @@ async def log_score_result(uid: int, result: str):
 
 # 🧾 Онооны өөрчлөлт бүрийг score_log руу хадгалах
 async def log_score_transaction(uid: int, delta: int, total: int, tier: str, reason: str):
-    conn = await connect()
-    await conn.execute("""
-        INSERT INTO score_log (timestamp, uid, delta, total, tier, reason)
-        VALUES (NOW(), $1, $2, $3, $4, $5)
-    """, uid, delta, total, tier, reason)
-    await conn.close()
+    try:
+        conn = await connect()
+        await conn.execute("""
+            INSERT INTO score_log (timestamp, uid, delta, total, tier, reason)
+            VALUES (NOW() AT TIME ZONE 'UTC', $1, $2, $3, $4, $5)
+        """, uid, delta, total, tier, reason)
+    except Exception as e:
+        print(f"⚠️ score_log insert failed — uid={uid}: {e}")
+    finally:
+        if conn:
+            await conn.close()
+
 
 # 🏆 Match бүртгэх
 async def insert_match(
