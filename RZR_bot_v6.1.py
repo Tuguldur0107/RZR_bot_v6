@@ -365,9 +365,9 @@ async def get_performance_emoji(uid: int) -> str:
             perf -= 1
 
     if perf > 0:
-        return "✅" * min(perf, 3)   # cap to 3, уртыг хэтрүүлэхгүй
+        return "✅" * min(perf)   # cap to 3, уртыг хэтрүүлэхгүй
     if perf < 0:
-        return "❌" * min(-perf, 3)
+        return "❌" * min(-perf)
     return ""
 
 # ⏱ 24h session timeout
