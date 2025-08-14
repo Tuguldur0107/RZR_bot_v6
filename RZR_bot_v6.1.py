@@ -17,7 +17,7 @@ from asyncio import sleep
 
 # 🗄️ Local modules
 from database import (
-    connect, pool, init_pool,
+    connect, pool, init_pool, ensure_pool,
 
     # 🎯 Score & tier
     get_score, upsert_score, get_all_scores, get_default_tier,
@@ -260,85 +260,55 @@ def clean_nickname(nick: str) -> str:
 # 🧠 nickname-г оноо + tier + emoji-гаар шинэчлэх
 
 
-async def update_nicknames_for_users(guild, user_ids: list, *, force: bool = False):
+async def update_nicknames_for_users(guild, user_ids: list[int]):
     donors = await get_all_donators()
-    MAX_NICK = 32
-
-    def build_nick(donor_emoji: str, tier: str, base: str, perf: str) -> str:
-        left = f"{(donor_emoji + ' ') if donor_emoji else ''}{tier} | "
-        right = f" | {perf}" if perf else ""
-        room = MAX_NICK - len(left) - len(right)
-        room = max(room, 1)
-        clean = base.strip()
-        if len(clean) > room:
-            cut = max(room - 1, 1)
-            clean = clean[:cut] + "…"
-        return f"{left}{clean}{right}"
-
-    # 🔐 Пермишн шалгалт
-    me = guild.me
-    if not me:
-        print("⛔️ guild.me is None")
-        return
-    if not me.guild_permissions.manage_nicknames:
-        print("⛔️ Bot-д manage_nicknames байхгүй")
-        return
 
     for uid in user_ids:
-        # 1) cache → API fallback
         member = guild.get_member(uid)
         if not member:
-            try:
-                member = await guild.fetch_member(uid)
-            except Exception as e:
-                print(f"⛔️ {uid}: member not found (cache/api) — {e}")
-                continue
-
-        # 2) server owner/role hierarchy
-        if getattr(member, "guild", None) and member == member.guild.owner:
-            print(f"⛔️ {uid}: owner тул nickname өөрчлөх боломжгүй")
             continue
-        try:
-            if member.top_role >= me.top_role:
-                print(f"⛔️ {uid}: role higher/equal → алгасав")
-                continue
-        except Exception as e:
-            print(f"⚠️ {uid}: role check fail — {e}")
+        # ⛔️ Bot өөрөөсөө адил/дээш role-той гишүүний нэрийг өөрчилж чаддаггүй
+        if member.top_role >= guild.me.top_role:
             continue
 
-        # 3) tier/data
         data = await get_score(uid)
         if not data:
-            print(f"ℹ️ {uid}: score data алга → алгасав")
             continue
 
         tier = data.get("tier", "4-1")
         base_nick = clean_nickname(member.display_name)
 
-        donor_data = donors.get(str(uid))
-        donor_emoji = get_donator_emoji(donor_data) if donor_data else ""
+        donor_emoji = get_donator_emoji(donors.get(str(uid))) or ""
+        performance_emoji = await get_performance_emoji(uid)
+
+        # 🧱 {donor} {tier} | {nickname} | {performance}
+        prefix = f"{donor_emoji} {tier}".strip()
+        parts = [prefix, base_nick]
+        if performance_emoji:
+            parts.append(performance_emoji)
+        new_nick = " | ".join(parts)
+
+        # ⛔️ 32 тэмдэгтэд багтаана — base_nick-ийг л тайрна
+        MAX_LEN = 32
+        if len(new_nick) > MAX_LEN:
+            # дахин тооцоолол: prefix + " | " + (optional " | perf")
+            fixed_len = len(prefix) + 3 + (3 + len(performance_emoji) if performance_emoji else 0)
+            allowed_base = max(MAX_LEN - fixed_len, 0)
+            base_nick = base_nick[:allowed_base]
+            parts = [prefix, base_nick]
+            if performance_emoji:
+                parts.append(performance_emoji)
+            new_nick = " | ".join([p for p in parts if p])
 
         try:
-            perf = await get_performance_emoji(uid)
+            if member.nick != new_nick:
+                await member.edit(nick=new_nick)
+                print(f"✅ nickname → {uid}: {new_nick}")
+            else:
+                print(f"↔️ {uid}: unchanged → алгасав ({new_nick})")
         except Exception as e:
-            print(f"⚠️ {uid}: perf emoji fail — {e}")
-            perf = ""
-
-        new_nick = build_nick(donor_emoji, tier, base_nick, perf)
-
-        # 4) unchanged guard (force=true бол заавал edit)
-        if not force and member.display_name == new_nick:
-            print(f"↔️ {uid}: unchanged → алгасав ({new_nick})")
-            continue
-
-        try:
-            await member.edit(nick=new_nick)
-            print(f"✅ {uid}: nickname → {new_nick}")
-            await sleep(0.3)  # ⏳ rate-limit friendly
-        except Exception as e:
-            print(f"⚠️ {uid}: nickname update алдаа — {e}")
+            print(f"⚠️ Nickname update алдаа: {uid} — {e}")
             traceback.print_exc()
-
 
 
 async def ensure_pool() -> bool:
@@ -362,49 +332,42 @@ async def get_performance_emoji(uid: int) -> str:
     query = """
         SELECT result
         FROM score_log
-        WHERE uid = $1 AND timestamp >= NOW() - INTERVAL '12 HOURS'
+        WHERE uid = $1
+          AND timestamp >= NOW() AT TIME ZONE 'UTC' - INTERVAL '12 HOURS'
     """
-
-    conn = None
     rows = []
+    conn = None
     try:
-        try:
-            used_pool = await ensure_pool()
-        except Exception:
-            used_pool = False
-
-        if used_pool and pool is not None:
+        ok = await ensure_pool()
+        if ok and pool is not None:
             async with pool.acquire() as aconn:
                 rows = await aconn.fetch(query, uid)
         else:
             conn = await connect()
             rows = await conn.fetch(query, uid)
-
-        perf = 0
-        for r in rows:
-            res = r["result"]
-            if res == "win":
-                perf += 1
-            elif res == "loss":
-                perf -= 1
-
-        if perf > 0:
-            count = perf if PERF_EMOJI_CAP is None else min(perf, PERF_EMOJI_CAP)
-            return "✅" * count
-        elif perf < 0:
-            count = (-perf) if PERF_EMOJI_CAP is None else min(-perf, PERF_EMOJI_CAP)
-            return "❌" * count
-        return ""
-
     except Exception as e:
         print(f"⚠️ get_performance_emoji алдаа: {uid} — {e}")
         return ""
     finally:
-        if conn is not None:
-            try:
-                await conn.close()
-            except Exception:
-                pass
+        if conn:
+            try: await conn.close()
+            except: pass
+
+    perf = 0
+    for r in rows:
+        res = r["result"]
+        if res == "win":
+            perf += 1
+        elif res == "loss":
+            perf -= 1
+
+    if perf > 0:
+        n = perf if PERF_EMOJI_CAP is None else min(perf, PERF_EMOJI_CAP)
+        return "✅" * n
+    if perf < 0:
+        n = (-perf) if PERF_EMOJI_CAP is None else min(-perf, PERF_EMOJI_CAP)
+        return "❌" * n
+    return ""
 
 
 # ⏱ 24h session timeout

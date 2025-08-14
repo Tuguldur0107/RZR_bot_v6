@@ -16,14 +16,30 @@ async def connect():
 # database.py файлд дараах функцуудыг нэм:
 
 load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 pool = None
 
 async def init_pool():
     global pool
     if pool is None:
+        if not DATABASE_URL:
+            raise RuntimeError("DATABASE_URL is not set")
         pool = await asyncpg.create_pool(DATABASE_URL)
 
+async def connect():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not set")
+    return await asyncpg.connect(DATABASE_URL)
+
+async def ensure_pool() -> bool:
+    try:
+        await init_pool()
+        return pool is not None
+    except Exception as e:
+        print(f"⚠️ ensure_pool error: {e}")
+        return False
+    
 async def get_all_scores():
     conn = await connect()
     rows = await conn.fetch("SELECT * FROM scores")
@@ -52,16 +68,25 @@ async def upsert_score(uid: int, score: int, tier: str, username: str):
 
 from datetime import datetime
 
+# ── Score result logger (win/loss) ────────────────────────────────────────────
 async def log_score_result(uid: int, result: str):
-    assert result in ["win", "loss"], "Invalid result"
+    SQL = """
+        INSERT INTO score_log (uid, result, timestamp)
+        VALUES ($1, $2, NOW() AT TIME ZONE 'UTC')
+    """
     try:
-        async with pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO score_log (uid, result) VALUES ($1, $2)",
-                uid, result
-            )
+        if await ensure_pool():
+            async with pool.acquire() as conn:
+                await conn.execute(SQL, uid, result)
+        else:
+            conn = await connect()
+            try:
+                await conn.execute(SQL, uid, result)
+            finally:
+                await conn.close()
     except Exception as e:
-        print(f"❌ log_score_result алдаа: {uid}, {result}", e)
+        print(f"❌ log_score_result алдаа: {uid}, {result} {e}")
+
 
 # 🧾 Онооны өөрчлөлт бүрийг score_log руу хадгалах
 async def log_score_transaction(uid: int, delta: int, total: int, tier: str, reason: str):
