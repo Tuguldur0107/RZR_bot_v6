@@ -303,6 +303,7 @@ async def update_nicknames_for_users(guild, user_ids: list):
 
 
 async def get_performance_emoji(uid: int) -> str:
+    print("🐛 get_performance_emoji called — pool is:", pool)
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
