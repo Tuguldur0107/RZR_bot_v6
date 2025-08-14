@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 import asyncpg
 import openai
 import traceback
-
+from asyncio import sleep
 
 # 🗄️ Local modules
 from database import (
@@ -258,9 +258,10 @@ def clean_nickname(nick: str) -> str:
     return nick.strip()
 
 # 🧠 nickname-г оноо + tier + emoji-гаар шинэчлэх
-async def update_nicknames_for_users(guild, user_ids: list):
-    donors = await get_all_donators()
 
+
+async def update_nicknames_for_users(guild, user_ids: list, *, force: bool = False):
+    donors = await get_all_donators()
     MAX_NICK = 32
 
     def build_nick(donor_emoji: str, tier: str, base: str, perf: str) -> str:
@@ -270,26 +271,45 @@ async def update_nicknames_for_users(guild, user_ids: list):
         room = max(room, 1)
         clean = base.strip()
         if len(clean) > room:
-            ellipsis = "…"
-            # хамгийн багадаа 1 тэмдэгт + …
-            cut = max(room - len(ellipsis), 1)
-            clean = clean[:cut] + ellipsis
+            cut = max(room - 1, 1)
+            clean = clean[:cut] + "…"
         return f"{left}{clean}{right}"
 
+    # 🔐 Пермишн шалгалт
+    me = guild.me
+    if not me:
+        print("⛔️ guild.me is None")
+        return
+    if not me.guild_permissions.manage_nicknames:
+        print("⛔️ Bot-д manage_nicknames байхгүй")
+        return
+
     for uid in user_ids:
+        # 1) cache → API fallback
         member = guild.get_member(uid)
         if not member:
-            continue
-
-        # Role hierarchy хамгаалалт (алдаа залгиж continue)
-        try:
-            if member.top_role >= guild.me.top_role:
+            try:
+                member = await guild.fetch_member(uid)
+            except Exception as e:
+                print(f"⛔️ {uid}: member not found (cache/api) — {e}")
                 continue
-        except Exception:
+
+        # 2) server owner/role hierarchy
+        if getattr(member, "guild", None) and member == member.guild.owner:
+            print(f"⛔️ {uid}: owner тул nickname өөрчлөх боломжгүй")
+            continue
+        try:
+            if member.top_role >= me.top_role:
+                print(f"⛔️ {uid}: role higher/equal → алгасав")
+                continue
+        except Exception as e:
+            print(f"⚠️ {uid}: role check fail — {e}")
             continue
 
+        # 3) tier/data
         data = await get_score(uid)
         if not data:
+            print(f"ℹ️ {uid}: score data алга → алгасав")
             continue
 
         tier = data.get("tier", "4-1")
@@ -298,24 +318,27 @@ async def update_nicknames_for_users(guild, user_ids: list):
         donor_data = donors.get(str(uid))
         donor_emoji = get_donator_emoji(donor_data) if donor_data else ""
 
-        # Performance emoji-г аюулгүй авч чаддаг
         try:
             perf = await get_performance_emoji(uid)
         except Exception as e:
-            print(f"⚠️ perf emoji fail uid={uid}: {e}")
+            print(f"⚠️ {uid}: perf emoji fail — {e}")
             perf = ""
 
         new_nick = build_nick(donor_emoji, tier, base_nick, perf)
 
-        if member.display_name == new_nick:
-            continue  # илүүц edit хийхгүй
+        # 4) unchanged guard (force=true бол заавал edit)
+        if not force and member.display_name == new_nick:
+            print(f"↔️ {uid}: unchanged → алгасав ({new_nick})")
+            continue
 
         try:
             await member.edit(nick=new_nick)
-            print(f"✅ Nickname шинэчлэгдлээ: {uid} → {new_nick}")
+            print(f"✅ {uid}: nickname → {new_nick}")
+            await sleep(0.3)  # ⏳ rate-limit friendly
         except Exception as e:
-            print(f"⚠️ Nickname update алдаа: {uid} — {e}")
+            print(f"⚠️ {uid}: nickname update алдаа — {e}")
             traceback.print_exc()
+
 
 
 async def ensure_pool() -> bool:
