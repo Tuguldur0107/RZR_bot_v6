@@ -68,8 +68,17 @@ async def upsert_score(uid: int, score: int, tier: str, username: str):
 
 from datetime import datetime
 
+async def connect():
+    # fallback single connection
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not set")
+    return await asyncpg.connect(DATABASE_URL)
+
 # ── Score result logger (win/loss) ────────────────────────────────────────────
 async def log_score_result(uid: int, result: str):
+    """
+    score_log(uid BIGINT, result TEXT CHECK (result IN ('win','loss')), timestamp TIMESTAMPTZ)
+    """
     SQL = """
         INSERT INTO score_log (uid, result, timestamp)
         VALUES ($1, $2, NOW() AT TIME ZONE 'UTC')
@@ -87,7 +96,28 @@ async def log_score_result(uid: int, result: str):
     except Exception as e:
         print(f"❌ log_score_result алдаа: {uid}, {result} {e}")
 
-
+async def log_score_audit(uid: int, delta: int, total: int, tier: str, reason: str):
+    """
+    score_audit(timestamp TIMESTAMPTZ, uid BIGINT, delta INT, total INT, tier TEXT, reason TEXT)
+    """
+    SQL = """
+        INSERT INTO score_audit (timestamp, uid, delta, total, tier, reason)
+        VALUES (NOW() AT TIME ZONE 'UTC', $1, $2, $3, $4, $5)
+    """
+    conn = None
+    try:
+        if await ensure_pool():
+            async with pool.acquire() as c:
+                await c.execute(SQL, uid, delta, total, tier, reason)
+        else:
+            conn = await connect()
+            await conn.execute(SQL, uid, delta, total, tier, reason)
+    except Exception as e:
+        print(f"⚠️ score_audit insert failed — uid={uid}: {e}")
+    finally:
+        if conn:
+            await conn.close()
+            
 # 🧾 Онооны өөрчлөлт бүрийг score_log руу хадгалах
 async def log_score_transaction(uid: int, delta: int, total: int, tier: str, reason: str):
     try:

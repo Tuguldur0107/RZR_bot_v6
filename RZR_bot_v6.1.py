@@ -248,26 +248,31 @@ def get_donator_emoji(data):
         return "💰"
 
 def clean_nickname(nick: str) -> str:
+    """
+    {donor} {tier} | {base} | {perf}  → base
+    {tier} | {base}                    → base
+    other                              → trimmed(nick)
+    """
     if not nick:
         return ""
-    parts = nick.split(" | ")
-    if len(parts) == 3:
-        return parts[1].strip()  # base_nick
-    elif len(parts) == 2:
-        return parts[1].strip()
+    parts = [p.strip() for p in nick.split(" | ")]
+    if len(parts) >= 2:
+        # len==3 (donor/tier | base | perf)  эсвэл len==2 (tier | base)
+        return parts[1]
     return nick.strip()
 
 # 🧠 nickname-г оноо + tier + emoji-гаар шинэчлэх
 
 
 async def update_nicknames_for_users(guild, user_ids: list[int]):
+    from database import get_all_donators, get_score
     donors = await get_all_donators()
 
+    MAX_LEN = 32
     for uid in user_ids:
         member = guild.get_member(uid)
         if not member:
             continue
-        # ⛔️ Bot өөрөөсөө адил/дээш role-той гишүүний нэрийг өөрчилж чаддаггүй
         if member.top_role >= guild.me.top_role:
             continue
 
@@ -276,29 +281,26 @@ async def update_nicknames_for_users(guild, user_ids: list[int]):
             continue
 
         tier = data.get("tier", "4-1")
-        base_nick = clean_nickname(member.display_name)
+        base = clean_nickname(member.display_name)
 
-        donor_emoji = get_donator_emoji(donors.get(str(uid))) or ""
-        performance_emoji = await get_performance_emoji(uid)
+        donor_emoji = ""
+        d = donors.get(str(uid))
+        if d:
+            donor_emoji = get_donator_emoji(d) or ""
 
-        # 🧱 {donor} {tier} | {nickname} | {performance}
+        perf = await get_performance_emoji(uid)
+
+        # "{donor} {tier} | {base} | {perf}"  (perf хоосон бол хоосон хэсэг нэмэхгүй)
         prefix = f"{donor_emoji} {tier}".strip()
-        parts = [prefix, base_nick]
-        if performance_emoji:
-            parts.append(performance_emoji)
+        parts = [prefix, base] + ([perf] if perf else [])
         new_nick = " | ".join(parts)
 
-        # ⛔️ 32 тэмдэгтэд багтаана — base_nick-ийг л тайрна
-        MAX_LEN = 32
         if len(new_nick) > MAX_LEN:
-            # дахин тооцоолол: prefix + " | " + (optional " | perf")
-            fixed_len = len(prefix) + 3 + (3 + len(performance_emoji) if performance_emoji else 0)
-            allowed_base = max(MAX_LEN - fixed_len, 0)
-            base_nick = base_nick[:allowed_base]
-            parts = [prefix, base_nick]
-            if performance_emoji:
-                parts.append(performance_emoji)
-            new_nick = " | ".join([p for p in parts if p])
+            fixed_len = len(prefix) + 3 + (3 + len(perf) if perf else 0)  # prefix + " | " + (" | perf")
+            allow = max(MAX_LEN - fixed_len, 0)
+            base = base[:allow]
+            parts = [prefix, base] + ([perf] if perf else [])
+            new_nick = " | ".join(parts)
 
         try:
             if member.nick != new_nick:
@@ -308,7 +310,7 @@ async def update_nicknames_for_users(guild, user_ids: list[int]):
                 print(f"↔️ {uid}: unchanged → алгасав ({new_nick})")
         except Exception as e:
             print(f"⚠️ Nickname update алдаа: {uid} — {e}")
-            traceback.print_exc()
+
 
 
 async def ensure_pool() -> bool:
@@ -326,25 +328,25 @@ async def ensure_pool() -> bool:
         return False
 
 # Хүсвэл global-config маягаар тавьж болно:
-PERF_EMOJI_CAP = None  # None = хязгааргүй; жишээ нь 10 гэж өгвөл 10 хүртэл хязгаарлана.
+PERF_EMOJI_CAP = None  # None = хязгааргүй; жишээ нь 10 бол 10 хүртэл
 
 async def get_performance_emoji(uid: int) -> str:
-    query = """
+    SQL = """
         SELECT result
         FROM score_log
         WHERE uid = $1
           AND timestamp >= NOW() AT TIME ZONE 'UTC' - INTERVAL '12 HOURS'
     """
-    rows = []
-    conn = None
+    rows, conn = [], None
     try:
+        from database import ensure_pool, pool, connect
         ok = await ensure_pool()
         if ok and pool is not None:
-            async with pool.acquire() as aconn:
-                rows = await aconn.fetch(query, uid)
+            async with pool.acquire() as c:
+                rows = await c.fetch(SQL, uid)
         else:
             conn = await connect()
-            rows = await conn.fetch(query, uid)
+            rows = await conn.fetch(SQL, uid)
     except Exception as e:
         print(f"⚠️ get_performance_emoji алдаа: {uid} — {e}")
         return ""
@@ -355,11 +357,7 @@ async def get_performance_emoji(uid: int) -> str:
 
     perf = 0
     for r in rows:
-        res = r["result"]
-        if res == "win":
-            perf += 1
-        elif res == "loss":
-            perf -= 1
+        perf += 1 if r["result"] == "win" else -1
 
     if perf > 0:
         n = perf if PERF_EMOJI_CAP is None else min(perf, PERF_EMOJI_CAP)
@@ -368,6 +366,7 @@ async def get_performance_emoji(uid: int) -> str:
         n = (-perf) if PERF_EMOJI_CAP is None else min(-perf, PERF_EMOJI_CAP)
         return "❌" * n
     return ""
+
 
 
 # ⏱ 24h session timeout
