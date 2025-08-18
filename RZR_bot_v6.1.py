@@ -1626,40 +1626,43 @@ async def donator_list(interaction: discord.Interaction):
 
         scores = await get_all_scores()
 
-        header_line = "💰" * 24
-        footer_line = "💖" * 24
-        separator = "-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━-"
+        # Donor-уудыг нийт мөнгөөр эрэмбэлэх
+        sorted_donors = sorted(
+            donors.items(),
+            key=lambda x: x[1].get("total_mnt", 0),
+            reverse=True
+        )
 
-        lines = [f"```", header_line, separator]
+        embed = discord.Embed(
+            title="💖 Donators",
+            description="**Манай server-г хөгжүүлж, дэмжиж буй бүх Donator хэрэглэгчиддээ баярлалаа!** 🎉",
+            color=0xFFD700
+        )
 
-        for uid, data in sorted(donors.items(), key=lambda x: x[1].get("total_mnt", 0), reverse=True):
+        top_emojis = ["🥇", "🥈", "🥉"]
+        total_sum = 0
+
+        for i, (uid, data) in enumerate(sorted_donors, start=1):
             member = interaction.guild.get_member(int(uid))
             if not member:
                 continue
 
-            emoji = get_donator_emoji(data) or ""
-            total = data.get("total_mnt", 0)
+            total = int(data.get("total_mnt", 0))
+            total_sum += total
             tier = scores.get(uid, {}).get("tier", "4-1")
-            nick = clean_nickname(member.display_name)
+            nick = member.mention
 
-            name_section = f"{emoji} {tier} | {nick}"
-            donation_section = f"{total:>7,}₮"
-            donation_section = f"{int(total):,}"  # 💵 format as number with commas
-            line = f"{name_section:<47} — {donation_section:>10}₮"
+            emoji = top_emojis[i-1] if i <= 3 else "✨"
+            value = f"**{nick}** (Tier {tier}) — **{total:,}₮**"
 
-            lines.append(line)
+            if i == 1:
+                embed.add_field(name="🏆 Top Donators", value=f"{emoji} {value}", inline=False)
+            elif i <= 3:
+                embed.add_field(name="\u200b", value=f"{emoji} {value}", inline=False)
+            else:
+                embed.add_field(name="Бусад дэмжигчид", value=f"{emoji} {value}", inline=False)
 
-        lines.append(separator)
-        lines.append(footer_line)
-        lines.append("```")
-
-        embed = Embed(
-            title="💖 Donators",
-            description="**Талархал илэрхийлье! Доорх хэрэглэгчид манай server-г дэмжиж, хөгжлийг нь тэтгэсэн байна.**",
-            color=0xFFD700
-        )
-        embed.add_field(name="Дэмжигчдийн жагсаалт", value="\n".join(lines), inline=False)
-        embed.set_footer(text="RZR Bot 🌀")
+        embed.set_footer(text=f"RZR Bot 🌀 | Дэмжлэгийн нийт дүн: {total_sum:,}₮")
 
         await interaction.followup.send(embed=embed)
 
