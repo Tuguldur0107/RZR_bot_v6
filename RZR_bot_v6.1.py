@@ -84,6 +84,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 async def call_gpt_balance_api(team_count, players_per_team, players):
     import json
+    from openai import OpenAI
+    client = OpenAI()  # эсвэл таны одоо хэрэглэж буй openai объект
 
     with open("prompts/balance_prompt.txt", "r", encoding="utf-8") as f:
         prompt_template = f.read()
@@ -91,42 +93,86 @@ async def call_gpt_balance_api(team_count, players_per_team, players):
     prompt = prompt_template.format(
         team_count=team_count,
         players_per_team=players_per_team,
-        players=json.dumps(players)
+        players=json.dumps(players, ensure_ascii=False)
     )
 
     try:
-        response = await openai.chat.completions.create(
+        # gpt-4o нь strict JSON-д сайн, response_format ашиглая
+        resp = await client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You're a helpful assistant that balances teams."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": "You are a precise team balancing engine that returns strict JSON only."},
+                {"role": "user", "content": prompt},
             ],
             temperature=0.0,
             max_tokens=1024,
             seed=42,
+            response_format={"type": "json_object"},
         )
 
-        content = response.choices[0].message.content.strip()
+        content = resp.choices[0].message.content.strip()
 
-        # Markdown блок устгана
-        if "```" in content:
-            parts = content.split("```")
-            for part in parts:
-                try:
-                    parsed = json.loads(part.strip().replace("json", ""))
-                    if "teams" in parsed:
-                        return parsed["teams"]
-                except:
-                    continue  # дараагийн блокыг үзнэ
-            raise ValueError("GPT хариултанд 'teams' JSON блок олдсонгүй.")
-        else:
-            # Шууд JSON гэж үзээд оролдоно
-            parsed = json.loads(content)
-            return parsed.get("teams", [])
+        # Ашиглах JSON-оо шууд parse
+        parsed = json.loads(content)
+        teams = parsed.get("teams", None)
+        if not isinstance(teams, list):
+            raise ValueError("`teams` not found or not a list in GPT response.")
+        return teams
 
     except Exception as e:
         print("❌ GPT баг хуваарилалт алдаа:", e)
-        raise Exception("GPT баг хуваарилалт амжилтгүй.")
+        raise
+
+def team_totals(teams, weights):
+    return [sum(weights.get(uid, 0) for uid in team) for team in teams]
+
+def balance_cost(teams, weights):
+    totals = team_totals(teams, weights)
+    return max(totals) - min(totals)
+
+def all_ids(teams):
+    return [uid for team in teams for uid in team]
+
+def local_refine(teams, weights, max_rounds=200):
+    """
+    Жижигхэн greedy swap heuristic:
+    - Багуудын аль хамгийн их/бага нийлбэртэйг олно
+    - Тэр 2 багийн гишүүдээс солилцох хос хайна (зардлыг багасгавал шууд хэрэгжүүлнэ)
+    - Давтана (max_rounds)
+    """
+    from copy import deepcopy
+    T = deepcopy(teams)
+    def score(tt): return balance_cost(tt, weights)
+
+    best = score(T)
+    rounds = 0
+
+    while rounds < max_rounds:
+        rounds += 1
+        totals = team_totals(T, weights)
+        hi = max(range(len(T)), key=lambda i: totals[i])
+        lo = min(range(len(T)), key=lambda i: totals[i])
+
+        improved = False
+        # hi ба lo багийн хооронд swap хайна
+        for a_idx, a in enumerate(T[hi]):
+            for b_idx, b in enumerate(T[lo]):
+                if a == b: 
+                    continue
+                cand = [list(x) for x in T]
+                cand[hi][a_idx], cand[lo][b_idx] = cand[lo][b_idx], cand[hi][a_idx]
+                c = score(cand)
+                if c < best:
+                    T = cand
+                    best = c
+                    improved = True
+                    break
+            if improved:
+                break
+
+        if not improved:
+            break
+    return T, best
 
 def tier_score(data: dict) -> int:
     tier = data.get("tier", "4-1")
@@ -813,7 +859,11 @@ async def go_bot(interaction: discord.Interaction, team_count: int, players_per_
     await interaction.followup.send("".join(lines))
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
-async def go_gpt(interaction: discord.Interaction):
+@app_commands.describe(
+    team_count="Багийн тоо (жишээ: 2)",
+    players_per_team="Нэг багт хэдэн тоглогч байх вэ (жишээ: 5)"
+)
+async def go_gpt(interaction: discord.Interaction, team_count: int, players_per_team: int):
     session = await load_session_state()
     if not session or not session.get("active"):
         await interaction.response.send_message("⚠️ Session идэвхгүй байна.", ephemeral=True)
@@ -821,9 +871,12 @@ async def go_gpt(interaction: discord.Interaction):
 
     is_admin = interaction.user.guild_permissions.administrator
     is_initiator = interaction.user.id == session.get("initiator_id")
-
     if not (is_admin or is_initiator):
         await interaction.response.send_message("❌ Зөвхөн admin эсвэл тохиргоог эхлүүлсэн хүн ажиллуулж чадна.", ephemeral=True)
+        return
+
+    if team_count < 2 or players_per_team < 1:
+        await interaction.response.send_message("⚠️ Багийн тоо ≥ 2, тоглогчийн тоо ≥ 1 байх ёстой.", ephemeral=True)
         return
 
     try:
@@ -831,70 +884,116 @@ async def go_gpt(interaction: discord.Interaction):
     except discord.errors.InteractionResponded:
         return
 
-    team_count = session.get("team_count", 2)
-    players_per_team = session.get("players_per_team", 5)
     total_slots = team_count * players_per_team
-    player_ids = session.get("player_ids", [])
+    player_ids = session.get("player_ids", []) or []
 
-    # ✅ Оноо + tier-ийн жингүүд
+    if not player_ids:
+        await interaction.followup.send("⚠️ Бүртгэгдсэн тоглогч алга байна.", ephemeral=True)
+        return
+
+    # 🔢 Жин (tier + score)
     all_scores = []
     for uid in player_ids:
         data = await get_score(uid) or get_default_tier()
         power = TIER_WEIGHT.get(data.get("tier", "4-1"), 0) + data.get("score", 0)
         all_scores.append({"id": uid, "power": power})
 
-    # ✂️ Хэтэрсэн тоглогчдыг тайрна
     sorted_players = sorted(all_scores, key=lambda x: x["power"], reverse=True)
-    selected_players = sorted_players[:total_slots]
+    selected_players = sorted_players[:total_slots]         # яг дүүргэх тоогоор хайчилж авна
     left_out_players = sorted_players[total_slots:]
-    score_map = {p["id"]: p["power"] for p in selected_players}
+    weights = {p["id"]: p["power"] for p in selected_players}
+    allowed_ids = {p["id"] for p in selected_players}
 
+    # 🧽 Sanitize helper
+    def sanitize(teams, team_count, players_per_team, allowed_ids):
+        if not isinstance(teams, list) or len(teams) != team_count:
+            return None
+        clean = []
+        seen = set()
+        for t in teams:
+            if not isinstance(t, list):
+                return None
+            row = []
+            for u in t:
+                try:
+                    u = int(u)
+                except:
+                    continue
+                if u in allowed_ids and u not in seen and len(row) < players_per_team:
+                    row.append(u); seen.add(u)
+            clean.append(row)
+
+        # дутууг нөхөх
+        remaining = [u for u in allowed_ids if u not in seen]
+        for i in range(team_count):
+            while len(clean[i]) < players_per_team and remaining:
+                clean[i].append(remaining.pop())
+
+        # валид
+        if any(len(x) != players_per_team for x in clean):
+            return None
+        return clean
+
+    # 🤖 GPT дуудах
     try:
-        teams = await call_gpt_balance_api(team_count, players_per_team, selected_players)
+        raw = await call_gpt_balance_api(team_count, players_per_team, selected_players)
     except Exception as e:
         print("❌ GPT API error:", e)
-        traceback.print_exc()  # ← энэ мөрийг нэм
-        await interaction.followup.send(
-            "⚠️ GPT-ээр баг хуваарилах үед алдаа гарлаа. Түр зуурын асуудал байж болзошгүй.\n"
-            "⏳ Дараа дахин оролдоно уу эсвэл `/go_bot` командыг ашиглаарай."
-        )
+        traceback.print_exc()
+        await interaction.followup.send("⚠️ GPT дуудлага амжилтгүй. Түр `/go_bot` эсвэл дараа дахин оролдоно уу.")
         return
 
-    # ✅ session шинэчилж хадгалах
-    session["teams"] = teams
-    session["strategy"] = "gpt"
+    teams = sanitize(raw, team_count, players_per_team, allowed_ids)
+    if teams is None:
+        await interaction.followup.send("⚠️ GPT буцаасан бүтэц буруу байлаа. `/go_bot` ашиглана уу.")
+        return
+
+    # 🔧 GPT гарцыг локал сайжруулалт (swap) – зардлыг улам бууруулна
+    refined_teams, cost = local_refine(teams, weights, max_rounds=300)
+
+    # 💾 Session
+    session["team_count"] = team_count
+    session["players_per_team"] = players_per_team
+    session["teams"] = refined_teams
+    session["strategy"] = f"gpt+local_refine(cost={cost})"
     session["last_win_time"] = datetime.now(timezone.utc).isoformat()
-    session["player_ids"] = list(score_map.keys())  # зөвхөн багт орсон
+    session["player_ids"] = list(weights.keys())
 
     await save_session_state(session, allow_empty=True)
 
-    # 📋 Хариу харуулах
+    # ⚡ Performance emoji (кэштэй)
+    perf_cache = {}
+    async def perf(uid: int) -> str:
+        if uid not in perf_cache:
+            perf_cache[uid] = await get_performance_emoji(uid)
+        return perf_cache[uid]
+
+    # 📋 Render
     guild = interaction.guild
     team_emojis = ["🥇", "🥈", "🥉", "🎯", "🔥", "🚀", "🎮", "🛡️", "⚔️", "🧠"]
-    used_ids = set(uid for team in teams for uid in team)
+    totals = team_totals(refined_teams, weights)
+    lines = [f"🤖 **ChatGPT + local refine** — (diff: `{max(totals)-min(totals)}`)\n(Багийн тоо: {team_count}, Нэг багт: {players_per_team})\n"]
 
-    lines = ["🤖 **ChatGPT-ээр тэнцвэржүүлсэн багууд:**"]
-    for i, team in enumerate(teams):
+    for i, team in enumerate(refined_teams):
         emoji = team_emojis[i % len(team_emojis)]
-        team_total = sum(score_map.get(uid, 0) for uid in team)
-        leader_uid = max(team, key=lambda uid: score_map.get(uid, 0))
-        leader_name = guild.get_member(leader_uid).display_name if guild.get_member(leader_uid) else str(leader_uid)
-
+        team_total = totals[i]
+        leader_uid = max(team, key=lambda uid: weights.get(uid, 0))
         lines.append(f"\n{emoji} **#{i+1}-р баг** (нийт оноо: {team_total}) 😎\n")
-        for uid in team:
+
+        perfs = await asyncio.gather(*[perf(uid) for uid in team])
+        for j, uid in enumerate(team):
             member = guild.get_member(uid)
-            name = member.display_name if member else f"{uid}"
-            weight = score_map.get(uid, 0)
-            if uid == leader_uid:
-                lines.append(f"{name} ({weight}) 😎 Team Leader\n")
-            else:
-                lines.append(f"{name} ({weight})\n")
+            name = member.display_name if member else str(uid)
+            w = weights.get(uid, 0)
+            mark = " 😎 Team Leader" if uid == leader_uid else ""
+            lines.append(f"{name} ({w}) {perfs[j]}{mark}\n")
 
     if left_out_players:
         mentions = "\n• ".join(f"<@{p['id']}>" for p in left_out_players)
         lines.append(f"\n⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {mentions}")
 
     await interaction.followup.send("".join(lines))
+
 
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
 @app_commands.describe(
@@ -1865,7 +1964,6 @@ async def match_history(interaction: discord.Interaction):
         )
 
     await interaction.followup.send("\n".join(lines))
-
 
 @bot.tree.command(name="resync", description="Slash командуудыг дахин бүртгэнэ (админ)")
 async def resync(interaction: discord.Interaction):
