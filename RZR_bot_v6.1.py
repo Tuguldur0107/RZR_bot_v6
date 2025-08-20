@@ -86,35 +86,36 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 async def call_gpt_balance_api(team_count, players_per_team, players):
     import json
-    from openai import OpenAI
-    client = OpenAI()  # эсвэл таны одоо хэрэглэж буй openai объект
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI()  # async client
 
-    with open("prompts/balance_prompt.txt", "r", encoding="utf-8") as f:
-        prompt_template = f.read()
-
-    prompt = prompt_template.format(
-        team_count=team_count,
-        players_per_team=players_per_team,
-        players=json.dumps(players, ensure_ascii=False)
-    )
+    # 📝 Тогтмол дүрэм (system message)
+    PROMPT_RULES = """
+    You are a precise team balancing engine.
+    Rules:
+    - Always return strict JSON only: {"teams": [[id1,id2,...],[...],...]}.
+    - Each team must have exactly {players_per_team} players, no duplicates.
+    - Use only IDs provided.
+    - Goal: minimize the difference in team total "power".
+    - Do not add any explanation or markdown.
+    """
 
     try:
-        # GPT-5 mini Balanced сонголт: хурд + үнэ + чанар дундаж түвшинд.
         resp = await client.chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-5-mini",   # эсвэл gpt-5 / gpt-5-nano гэж солиод хэрэглэж болно
             messages=[
-                {"role": "system", "content": "You are a precise team balancing engine that returns strict JSON only."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": PROMPT_RULES.format(players_per_team=players_per_team)},
+                {"role": "user", "content": json.dumps({
+                    "team_count": team_count,
+                    "players_per_team": players_per_team,
+                    "players": players
+                }, ensure_ascii=False)}
             ],
             temperature=0.0,
-            max_tokens=1024,
-            seed=42,
             response_format={"type": "json_object"},
         )
 
         content = resp.choices[0].message.content.strip()
-
-        # Ашиглах JSON-оо шууд parse
         parsed = json.loads(content)
         teams = parsed.get("teams", None)
         if not isinstance(teams, list):
