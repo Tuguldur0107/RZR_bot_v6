@@ -1641,6 +1641,7 @@ async def donator_list(interaction: discord.Interaction):
 
         top_emojis = ["🥇", "🥈", "🥉"]
         total_sum = 0
+        others_text = ""
 
         for i, (uid, data) in enumerate(sorted_donors, start=1):
             member = interaction.guild.get_member(int(uid))
@@ -1653,14 +1654,18 @@ async def donator_list(interaction: discord.Interaction):
             nick = member.mention
 
             emoji = top_emojis[i-1] if i <= 3 else "✨"
-            value = f"**{nick}** (Tier {tier}) — **{total:,}₮**"
+            value = f"{emoji} **{nick}** (Tier {tier}) — **{total:,}₮**"
 
             if i == 1:
-                embed.add_field(name="🏆 Top Donators", value=f"{emoji} {value}", inline=False)
+                embed.add_field(name="🏆 Top Donators", value=value, inline=False)
             elif i <= 3:
-                embed.add_field(name="\u200b", value=f"{emoji} {value}", inline=False)
+                embed.add_field(name="\u200b", value=value, inline=False)
             else:
-                embed.add_field(name="Бусад дэмжигчид", value=f"{emoji} {value}", inline=False)
+                others_text += f"\n{value}"
+
+        # Top 3-с хойшхи бүх доноруудыг нэг field-д оруулах
+        if others_text:
+            embed.add_field(name="Бусад дэмжигчид", value=others_text.strip(), inline=False)
 
         embed.set_footer(text=f"RZR Bot 🌀 | Дэмжлэгийн нийт дүн: {total_sum:,}₮")
 
