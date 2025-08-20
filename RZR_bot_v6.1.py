@@ -99,9 +99,9 @@ async def call_gpt_balance_api(team_count, players_per_team, players):
     )
 
     try:
-        # gpt-4o нь strict JSON-д сайн, response_format ашиглая
+        # GPT-5 mini Balanced сонголт: хурд + үнэ + чанар дундаж түвшинд.
         resp = await client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-5-mini",
             messages=[
                 {"role": "system", "content": "You are a precise team balancing engine that returns strict JSON only."},
                 {"role": "user", "content": prompt},
