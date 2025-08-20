@@ -462,24 +462,37 @@ def _tier_arrow(old_tier: str, new_tier: str) -> str:
     except Exception:
         return ""
 
-async def _fmt_player_line(guild, weights_map, p: Dict) -> str:
+async def _fmt_player_line(guild, weights_map, p: dict) -> str:
     """
-    p: {"uid", "username", "old_score","new_score","old_tier","new_tier","team"}
+    p: {"uid","username","old_score","new_score","old_tier","new_tier","team"}
     """
     uid = p["uid"]
     member = guild.get_member(uid)
-    name = member.display_name if member else p.get("username") or str(uid)
+
+    # 🔧 Ник доторх "tier | base | perf" загвараас зөвхөн BASE нэрийг гаргана
+    raw_name = member.display_name if member else (p.get("username") or str(uid))
+    base = clean_nickname(raw_name) or raw_name
+
     old_s, new_s = p.get("old_score", 0), p.get("new_score", 0)
     old_t, new_t = p.get("old_tier", "4-1"), p.get("new_tier", "4-1")
-    arrow = _tier_arrow(old_t, new_t)
-    perf  = await get_performance_emoji(uid)  # ✅ / ❌ / ⏸ / ➖
-    w     = weights_map.get(uid)  # байхгүй байж болно
-    w_txt = f" · w:{w}" if w is not None else ""
-    return f"- <@{uid}> **{name}** — `{old_s} → {new_s}` · `[{old_t} → {new_t}]` {arrow} {perf}{w_txt}"
 
-def _chunks(lst, n):
-    for i in range(0, len(lst), n):
-        yield lst[i:i+n]
+    # Tier өөрчлөлтийн сум
+    try:
+        oi = TIER_ORDER.index(old_t); ni = TIER_ORDER.index(new_t)
+        t_arrow = "⬆" if ni < oi else ("⬇" if ni > oi else "→")
+    except Exception:
+        t_arrow = ""
+
+    # Перф эможи (сүүлийн 12 цаг)
+    perf = await get_performance_emoji(uid)
+
+    # Хэрэв жин байгаа бол харуулна
+    w = weights_map.get(uid)
+    wtxt = f" · w:{w}" if w is not None else ""
+
+    # 🧾 Эцсийн мөр – mention + base нэр, дараа нь оноо/тэр/перф
+    return f"- <@{uid}> **{base}** — `{old_s} → {new_s}` · `[{old_t} → {new_t}]` {t_arrow} {perf}{wtxt}"
+
 
 async def send_match_result_embed(
     interaction: discord.Interaction,
@@ -555,11 +568,16 @@ def _team_badge(i: int) -> str:
 
 async def _fmt_member_line(guild, uid: int, w: int | None, is_leader: bool) -> str:
     member = guild.get_member(uid)
-    name = member.display_name if member else str(uid)
-    perf = await get_performance_emoji(uid)  # ✅/❌/⏸/➖
+    raw = member.display_name if member else str(uid)
+
+    # 🔧 Никнэймээс base‑ийг салгаж авна (tier/emoji-г давтахгүй)
+    base = clean_nickname(raw) or raw
+
+    perf = await get_performance_emoji(uid)
     leader = " 😎 Team Leader" if is_leader else ""
     wtxt = f" ({w})" if w is not None else ""
-    return f"- {name}{wtxt} {perf}{leader}"
+    return f"- <@{uid}> **{base}**{wtxt} {perf}{leader}"
+
 
 def _split_fields(lines: List[str], per_field: int = 10) -> List[str]:
     return ["\n".join(lines[i:i+per_field]) for i in range(0, len(lines), per_field)]
