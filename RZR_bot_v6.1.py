@@ -14,6 +14,8 @@ import asyncpg
 import openai
 import traceback
 from asyncio import sleep
+from typing import List, Dict
+import math
 
 # 🗄️ Local modules
 from database import (
@@ -307,9 +309,6 @@ def clean_nickname(nick: str) -> str:
         return parts[1]
     return nick.strip()
 
-# 🧠 nickname-г оноо + tier + emoji-гаар шинэчлэх
-
-
 async def update_nicknames_for_users(guild, user_ids: list[int]):
     from database import get_all_donators, get_score
     donors = await get_all_donators()
@@ -334,9 +333,9 @@ async def update_nicknames_for_users(guild, user_ids: list[int]):
         if d:
             donor_emoji = get_donator_emoji(d) or ""
 
-        perf = await get_performance_emoji(uid)
+        perf = await get_performance_emoji(uid)  # "✅✅", "❌", "⏸", "➖" г.м.
 
-        # "{donor} {tier} | {base} | {perf}"  (perf хоосон бол хоосон хэсэг нэмэхгүй)
+        # "{donor} {tier} | {base} | {perf}"  (perf хоосон/⏸/➖ байсан ч харагдана)
         prefix = f"{donor_emoji} {tier}".strip()
         parts = [prefix, base] + ([perf] if perf else [])
         new_nick = " | ".join(parts)
@@ -357,13 +356,7 @@ async def update_nicknames_for_users(guild, user_ids: list[int]):
         except Exception as e:
             print(f"⚠️ Nickname update алдаа: {uid} — {e}")
 
-
-
 async def ensure_pool() -> bool:
-    """
-    Pool байхгүй бол init_pool() дуудаад True буцаана.
-    Амжилтгүй бол False — энэ үед connect() fallback ашиглана.
-    """
     try:
         if pool is None:
             print("ℹ️ ensure_pool: initializing pool…")
@@ -372,38 +365,40 @@ async def ensure_pool() -> bool:
     except Exception as e:
         print(f"⚠️ ensure_pool error: {e}")
         return False
-
-# Хүсвэл global-config маягаар тавьж болно:
-PERF_EMOJI_CAP = None  # None = хязгааргүй; жишээ нь 10 бол 10 хүртэл
+    
+PERF_EMOJI_CAP = None  # None = хязгааргүй; жишээ нь 5 бол 5 хүртэл
 
 async def get_performance_emoji(uid: int) -> str:
     SQL = """
         SELECT result
         FROM score_log
         WHERE uid = $1
-          AND timestamp >= NOW() AT TIME ZONE 'UTC' - INTERVAL '12 HOURS'
+          AND timestamp >= (NOW() AT TIME ZONE 'UTC') - INTERVAL '12 HOURS'
     """
     rows, conn = [], None
     try:
-        from database import ensure_pool, pool, connect
-        ok = await ensure_pool()
-        if ok and pool is not None:
-            async with pool.acquire() as c:
+        from database import ensure_pool as _ensure, pool as _pool, connect as _connect
+        ok = await _ensure()
+        if ok and _pool is not None:
+            async with _pool.acquire() as c:
                 rows = await c.fetch(SQL, uid)
         else:
-            conn = await connect()
+            conn = await _connect()
             rows = await conn.fetch(SQL, uid)
     except Exception as e:
         print(f"⚠️ get_performance_emoji алдаа: {uid} — {e}")
         return ""
     finally:
         if conn:
-            try: await conn.close()
-            except: pass
+            try:
+                await conn.close()
+            except:
+                pass
 
-    perf = 0
-    for r in rows:
-        perf += 1 if r["result"] == "win" else -1
+    if not rows:
+        return "⏸"  # сүүлийн 12 цагт тоглоогүй (ялгаатай тэмдэг)
+
+    perf = sum(1 if r["result"] == "win" else -1 for r in rows)
 
     if perf > 0:
         n = perf if PERF_EMOJI_CAP is None else min(perf, PERF_EMOJI_CAP)
@@ -411,9 +406,24 @@ async def get_performance_emoji(uid: int) -> str:
     if perf < 0:
         n = (-perf) if PERF_EMOJI_CAP is None else min(-perf, PERF_EMOJI_CAP)
         return "❌" * n
-    return ""
+    return "➖"  # ялалт/ялагдал тэнцүү
 
-
+async def ensure_scores_for_users(guild, uids: list[int]) -> list[int]:
+    """scores хүснэгтэд байхгүй бол default tier/score-оор үүсгэнэ."""
+    created = []
+    for uid in uids:
+        try:
+            if not await get_score(uid):
+                member = guild.get_member(uid)
+                username = member.display_name if member else "Unknown"
+                d = get_default_tier()  # {"score":0,"tier":"4-1"}
+                await upsert_score(uid, d["score"], d["tier"], username)
+                created.append(uid)
+        except Exception as e:
+            print(f"⚠️ ensure_scores_for_users алдаа uid={uid}: {e}")
+    if created:
+        print(f"🆕 scores-д шинээр нэмэгдсэн: {created}")
+    return created
 
 # ⏱ 24h session timeout
 async def session_timeout_checker():
@@ -441,6 +451,192 @@ async def session_timeout_checker():
                     print("🔚 Session автоматаар хаагдлаа (24h).")
             except Exception as e:
                 print("⚠️ session_timeout_checker parse алдаа:", e)
+
+def _tier_arrow(old_tier: str, new_tier: str) -> str:
+    try:
+        oi = TIER_ORDER.index(old_tier); ni = TIER_ORDER.index(new_tier)
+        if ni < oi:  return "⬆"
+        if ni > oi:  return "⬇"
+        return "→"
+    except Exception:
+        return ""
+
+async def _fmt_player_line(guild, weights_map, p: Dict) -> str:
+    """
+    p: {"uid", "username", "old_score","new_score","old_tier","new_tier","team"}
+    """
+    uid = p["uid"]
+    member = guild.get_member(uid)
+    name = member.display_name if member else p.get("username") or str(uid)
+    old_s, new_s = p.get("old_score", 0), p.get("new_score", 0)
+    old_t, new_t = p.get("old_tier", "4-1"), p.get("new_tier", "4-1")
+    arrow = _tier_arrow(old_t, new_t)
+    perf  = await get_performance_emoji(uid)  # ✅ / ❌ / ⏸ / ➖
+    w     = weights_map.get(uid)  # байхгүй байж болно
+    w_txt = f" · w:{w}" if w is not None else ""
+    return f"- <@{uid}> **{name}** — `{old_s} → {new_s}` · `[{old_t} → {new_t}]` {arrow} {perf}{w_txt}"
+
+def _chunks(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i+n]
+
+async def send_match_result_embed(
+    interaction: discord.Interaction,
+    *,
+    mode_label: str,               # "Normal" | "Fountain"
+    ranked: bool,
+    win_indexes: List[int],
+    lose_indexes: List[int],
+    winner_details: List[Dict],
+    loser_details: List[Dict],
+    session: Dict,
+    weights_map: Dict[int, int] | None = None
+):
+    guild = interaction.guild
+    weights_map = weights_map or {}
+
+    # ─ Summary ─
+    win_str  = ", ".join(f"{i+1}-р баг" for i in win_indexes) if win_indexes else "—"
+    lose_str = ", ".join(f"{i+1}-р баг" for i in lose_indexes) if lose_indexes else "—"
+    ranked_badge = "🏅 Ranked" if ranked else "⚠️ Unranked"
+    title = f"🏆 Match Result — {mode_label} ({ranked_badge})"
+
+    emb = discord.Embed(
+        title=title,
+        description=f"**Winners:** {win_str}\n**Losers:** {lose_str}",
+        color=0x43B581 if ranked else 0x7289DA
+    )
+
+    # ─ Winners field(s) ─
+    if winner_details:
+        lines_w = []
+        for p in winner_details:
+            try:
+                line = await _fmt_player_line(guild, weights_map, p)
+                lines_w.append(line)
+            except Exception as e:
+                print("winner line error:", e)
+        # Discord embed field limit ~1024 тэмдэгт → хэсэглэж нэмнэ
+        for part in _chunks(lines_w, 10):
+            emb.add_field(name="✅ Winners", value="\n".join(part), inline=False)
+    else:
+        emb.add_field(name="✅ Winners", value="—", inline=False)
+
+    # ─ Losers field(s) ─
+    if loser_details:
+        lines_l = []
+        for p in loser_details:
+            try:
+                line = await _fmt_player_line(guild, weights_map, p)
+                lines_l.append(line)
+            except Exception as e:
+                print("loser line error:", e)
+        for part in _chunks(lines_l, 10):
+            emb.add_field(name="💀 Losers", value="\n".join(part), inline=False)
+    else:
+        emb.add_field(name="💀 Losers", value="—", inline=False)
+
+    # ─ Footer ─
+    initiator = session.get("initiator_id")
+    team_cnt  = session.get("team_count") or len(session.get("teams") or [])
+    ppl_team  = session.get("players_per_team") or (max(len(t) for t in session.get("teams") or [[]]) if session.get("teams") else 0)
+    emb.set_footer(text=f"Teams: {team_cnt} × {ppl_team} • Initiator: {initiator}")
+
+    # Илгээх
+    await interaction.followup.send(embed=emb)
+
+# ── Team assignment Embed helper ─────────────────────────────────────────────
+from typing import Dict, List
+
+def _team_badge(i: int) -> str:
+    badges = ["🥇","🥈","🥉","🎯","🔥","🚀","🎮","🛡️","⚔️","🧠","🏅"]
+    return badges[i % len(badges)]
+
+async def _fmt_member_line(guild, uid: int, w: int | None, is_leader: bool) -> str:
+    member = guild.get_member(uid)
+    name = member.display_name if member else str(uid)
+    perf = await get_performance_emoji(uid)  # ✅/❌/⏸/➖
+    leader = " 😎 Team Leader" if is_leader else ""
+    wtxt = f" ({w})" if w is not None else ""
+    return f"- {name}{wtxt} {perf}{leader}"
+
+def _split_fields(lines: List[str], per_field: int = 10) -> List[str]:
+    return ["\n".join(lines[i:i+per_field]) for i in range(0, len(lines), per_field)]
+
+async def send_team_assignment_embed(
+    interaction: discord.Interaction,
+    *,
+    title_prefix: str,            # "Bot" | "GPT"
+    strategy_note: str,           # ж: "`snake` (diff=12)" эсвэл "`gpt+local_refine` (diff=7)"
+    team_count: int,
+    players_per_team: int,
+    teams: List[List[int]],
+    weights_map: Dict[int, int],
+    left_out: List[int] | List[tuple] | None = None,
+    ranked: bool | None = None
+):
+    guild = interaction.guild
+    left_out = left_out or []
+    # total & diff
+    totals = [sum(weights_map.get(u, 0) for u in team) for team in teams]
+    diff = (max(totals) - min(totals)) if totals else 0
+
+    ranked_badge = ""
+    if ranked is not None:
+        ranked_badge = " • 🏅 Ranked" if ranked else " • ⚠️ Unranked"
+
+    emb = discord.Embed(
+        title=f"🤝 {title_prefix} — Team Assignment",
+        description=f"Strategy: {strategy_note} • diff: `{diff}`{ranked_badge}\n"
+                    f"Setup: **{team_count} × {players_per_team}**",
+        color=0x2ECC71 if title_prefix.lower() == "bot" else 0x5865F2
+    )
+
+    # Teams
+    for i, team in enumerate(teams):
+        badge = _team_badge(i)
+        t_total = totals[i] if i < len(totals) else 0
+        # team leader (highest weight)
+        leader_uid = max(team, key=lambda u: weights_map.get(u, 0)) if team else None
+
+        # member lines
+        member_lines = []
+        for u in team:
+            w = weights_map.get(u)
+            member_lines.append(await _fmt_member_line(guild, u, w, is_leader=(u == leader_uid)))
+
+        # split to multiple fields if long
+        parts = _split_fields(member_lines, per_field=10)
+        # first field shows team header
+        if parts:
+            emb.add_field(
+                name=f"{badge} Team #{i+1} — total: `{t_total}`",
+                value=parts[0],
+                inline=False
+            )
+            for extra in parts[1:]:
+                emb.add_field(name="\u200B", value=extra, inline=False)  # zero-width header
+        else:
+            emb.add_field(
+                name=f"{badge} Team #{i+1} — total: `{t_total}`",
+                value="—",
+                inline=False
+            )
+
+    # Left‑out players (if any)
+    lo_ids = []
+    if left_out:
+        # left_out may be list[(uid, weight)] эсвэл list[uid]
+        for x in left_out:
+            if isinstance(x, tuple) or isinstance(x, list):
+                lo_ids.append(int(x[0]))
+            else:
+                lo_ids.append(int(x))
+        lo_text = "• " + "\n• ".join(f"<@{u}>" for u in lo_ids)
+        emb.add_field(name="⚠️ This round not included", value=lo_text, inline=False)
+
+    await interaction.followup.send(embed=emb)
+
 
 # 🧬 Start
 @bot.event
@@ -560,27 +756,59 @@ async def show_added_players(interaction: discord.Interaction):
             await interaction.followup.send("⚠️ Session ачаалахад алдаа гарлаа.")
             return
 
-        player_ids = session.get("player_ids", [])
+        player_ids = session.get("player_ids", []) or []
         if not player_ids:
             await interaction.followup.send("📭 Одоогоор бүртгэгдсэн тоглогч алга.")
             return
 
         guild = interaction.guild
-        mentions = []
-        for uid in player_ids:
+
+        # ✅ Нэг дор аваад DB round-trip багасгана
+        all_scores = await get_all_scores()  # { "uid": {tier, score, ...}, ... }
+
+        # 🔢 мөр бүрийн мэдээллийг параллель бэлдэх
+        async def build_row(uid: int):
             member = guild.get_member(uid)
-            if member:
-                try:
-                    mentions.append(member.display_name)
-                except Exception as e:
-                    print(f"⚠️ mention алдаа uid={uid}:", e)
+            name = member.display_name if member else f"{uid}"
+            data = all_scores.get(str(uid)) or get_default_tier()
+            tier = data.get("tier", "4-1")
+            score = int(data.get("score", 0))
+            weight = TIER_WEIGHT.get(tier, 0) + score
+            perf = await get_performance_emoji(uid)  # ✅/❌/⏸/➖
+            return (uid, name, tier, score, weight, perf)
 
-        if not mentions:
-            await interaction.followup.send("⚠️ Discord серверээс нэрсийг ачаалж чадсангүй.")
-            return
+        rows = await asyncio.gather(*[build_row(uid) for uid in player_ids])
 
-        text = "\n".join(mentions)
-        await interaction.followup.send(f"📋 Бүртгэгдсэн {len(mentions)} тоглогч:\n{text}")
+        # 📊 Жингээр (ихээс багад) эрэмбэлнэ
+        rows.sort(key=lambda r: r[4], reverse=True)
+
+        # 🖼 Embed бэлдье
+        emb = discord.Embed(
+            title=f"📋 Бүртгэгдсэн тоглогчид — {len(rows)}",
+            description="Жин (tier+score)‑ээр эрэмбэлсэн жагсаалт.",
+            color=0xF1C40F
+        )
+
+        # мөрүүдийг 10-аар нь багцалж талбаруудад хийнэ (Discord field limit хамгаална)
+        lines = [
+            f"- {name} — `{tier} | {score:+}` · w:`{weight}` {perf}"
+            for (_uid, name, tier, score, weight, perf) in rows
+        ]
+        parts = ["\n".join(lines[i:i+10]) for i in range(0, len(lines), 10)]
+
+        if parts:
+            emb.add_field(name="👥 Тоглогчид", value=parts[0], inline=False)
+            for extra in parts[1:]:
+                emb.add_field(name="\u200B", value=extra, inline=False)  # zero-width header
+        else:
+            emb.add_field(name="👥 Тоглогчид", value="—", inline=False)
+
+        # 💡 Жижиг зөвлөмж
+        team_count = session.get("team_count") or 2
+        ppl_per = session.get("players_per_team") or 5
+        emb.set_footer(text=f"Tip: /go_bot {team_count} {ppl_per} эсвэл /go_gpt {team_count} {ppl_per}")
+
+        await interaction.followup.send(embed=emb)
 
     except Exception as e:
         print("❌ show_added_players алдаа:", e)
@@ -832,31 +1060,23 @@ async def go_bot(interaction: discord.Interaction, team_count: int, players_per_
     except Exception as e:
         print("❌ save_session_state алдаа /go_bot:", e)
 
-    # 📋 Хариу харуулах
-    guild = interaction.guild
-    team_emojis = ["🏆", "💎", "🔥", "🚀", "🛡️", "🎯", "🎮", "🧠", "📦", "⚡️"]
-    lines = [f"✅ `{strategy}` хуваарилалт ашиглав (онооны зөрүү: `{best_diff}`)\n"]
-
-    for i, team in enumerate(best_teams, start=1):
-        emoji = team_emojis[i - 1] if i - 1 < len(team_emojis) else "🏅"
-        total = sum(trimmed_weights.get(uid, 0) for uid in team)
-        leader = max(team, key=lambda uid: trimmed_weights.get(uid, 0))
-        lines.append(f"{emoji} **#{i}-р баг** (нийт оноо: {total}) 😎\n")
-        for uid in team:
-            member = guild.get_member(uid)
-            name = member.display_name if member else str(uid)
-            score = trimmed_weights.get(uid, 0)
-            lines.append(f"{name} ({score})" + (" 😎 Team Leader\n" if uid == leader else "\n"))
-        lines.append("\n")
-
-    if left_out_players:
-        out = "\n• ".join(f"<@{uid}>" for uid, _ in left_out_players)
-        lines.append(f"⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {out}")
-
+    # 🆕 Embed render
     is_ranked = players_per_team in [4, 5] and team_count >= 2
-    lines.append("\n" + ("🏅 Энэ match: **Ranked** ✅ (оноо тооцно)" if is_ranked else "⚠️ Энэ match: **Ranked биш** ❌"))
+    try:
+        await send_team_assignment_embed(
+            interaction,
+            title_prefix="Bot",
+            strategy_note=f"`{strategy}` (diff={best_diff})",
+            team_count=team_count,
+            players_per_team=players_per_team,
+            teams=best_teams,
+            weights_map=trimmed_weights,               # {uid: weight}
+            left_out=[uid for uid, _ in left_out_players],
+            ranked=is_ranked
+        )
+    except Exception:
+        traceback.print_exc()
 
-    await interaction.followup.send("".join(lines))
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 @app_commands.describe(
@@ -968,31 +1188,22 @@ async def go_gpt(interaction: discord.Interaction, team_count: int, players_per_
             perf_cache[uid] = await get_performance_emoji(uid)
         return perf_cache[uid]
 
-    # 📋 Render
-    guild = interaction.guild
-    team_emojis = ["🥇", "🥈", "🥉", "🎯", "🔥", "🚀", "🎮", "🛡️", "⚔️", "🧠"]
-    totals = team_totals(refined_teams, weights)
-    lines = [f"🤖 **ChatGPT + local refine** — (diff: `{max(totals)-min(totals)}`)\n(Багийн тоо: {team_count}, Нэг багт: {players_per_team})\n"]
-
-    for i, team in enumerate(refined_teams):
-        emoji = team_emojis[i % len(team_emojis)]
-        team_total = totals[i]
-        leader_uid = max(team, key=lambda uid: weights.get(uid, 0))
-        lines.append(f"\n{emoji} **#{i+1}-р баг** (нийт оноо: {team_total}) 😎\n")
-
-        perfs = await asyncio.gather(*[perf(uid) for uid in team])
-        for j, uid in enumerate(team):
-            member = guild.get_member(uid)
-            name = member.display_name if member else str(uid)
-            w = weights.get(uid, 0)
-            mark = " 😎 Team Leader" if uid == leader_uid else ""
-            lines.append(f"{name} ({w}) {perfs[j]}{mark}\n")
-
-    if left_out_players:
-        mentions = "\n• ".join(f"<@{p['id']}>" for p in left_out_players)
-        lines.append(f"\n⚠️ **Дараах тоглогчид энэ удаад багт орсонгүй:**\n• {mentions}")
-
-    await interaction.followup.send("".join(lines))
+    # 🆕 Embed render
+    is_ranked = players_per_team in [4, 5] and team_count >= 2
+    try:
+        await send_team_assignment_embed(
+            interaction,
+            title_prefix="GPT",
+            strategy_note=f"`gpt+local_refine` (cost={cost})",
+            team_count=team_count,
+            players_per_team=players_per_team,
+            teams=refined_teams,
+            weights_map=weights,                        # {uid: power}
+            left_out=[p["id"] for p in left_out_players],
+            ranked=is_ranked
+        )
+    except Exception:
+        traceback.print_exc()
 
 
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
@@ -1034,9 +1245,12 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         return
 
     winners = [uid for i in win_indexes for uid in all_teams[i]]
-    losers = [uid for i in lose_indexes for uid in all_teams[i]]
+    losers  = [uid for i in lose_indexes for uid in all_teams[i]]
     now = datetime.now(timezone.utc)
     guild = interaction.guild
+
+    # 🆕 winners/losers бүх UID-д scores-д default бичлэг үүсгэнэ
+    await ensure_scores_for_users(guild, list(set(winners + losers)))
 
     def validate_tier(tier): return tier if tier in TIER_ORDER else "4-1"
 
@@ -1049,9 +1263,10 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             data["tier"] = demote_tier(data["tier"])
             data["score"] = 0
         return data
-    
+
     winner_details, loser_details = [], []
 
+    # ✅ WINNERS
     for uid in winners:
         try:
             data = await get_score(uid) or get_default_tier()
@@ -1060,24 +1275,28 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
             member = guild.get_member(uid)
             username = member.display_name if member else "Unknown"
 
+            # Оноо/түйвшин зөвхөн ranked үед
             if ranked:
                 data = adjust_score(data, +1)
                 await upsert_score(uid, data["score"], data["tier"], username)
                 await update_player_stats(uid, is_win=True)
-                await log_score_result(uid, "win")  # ⬅️ нэмэх
+
+            # 🆕 PERF LOG — ranked‑аас үл хамааран
+            try:
+                await log_score_result(uid, "win")
+            except Exception as e:
+                print("⚠️ log_score_result(win) алдаа:", e)
 
             winner_details.append({
-                "uid": uid,
-                "username": username,
+                "uid": uid, "username": username,
                 "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
-                "old_score": old_score,
-                "new_score": data["score"],
-                "old_tier": old_tier,
-                "new_tier": data["tier"]
+                "old_score": old_score, "new_score": data["score"],
+                "old_tier": old_tier, "new_tier": data["tier"]
             })
         except Exception as e:
             print(f"❌ Winner uid:{uid} update fail:", e)
 
+    # ❌ LOSERS
     for uid in losers:
         try:
             data = await get_score(uid) or get_default_tier()
@@ -1090,25 +1309,29 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
                 data = adjust_score(data, -1)
                 await upsert_score(uid, data["score"], data["tier"], username)
                 await update_player_stats(uid, is_win=False)
-                await log_score_result(uid, "loss")  # ⬅️ нэмэх
+
+            # 🆕 PERF LOG — ranked‑аас үл хамааран
+            try:
+                await log_score_result(uid, "loss")
+            except Exception as e:
+                print("⚠️ log_score_result(loss) алдаа:", e)
 
             loser_details.append({
-                "uid": uid,
-                "username": username,
+                "uid": uid, "username": username,
                 "team": next((i+1 for i, team in enumerate(all_teams) if uid in team), None),
-                "old_score": old_score,
-                "new_score": data["score"],
-                "old_tier": old_tier,
-                "new_tier": data["tier"]
+                "old_score": old_score, "new_score": data["score"],
+                "old_tier": old_tier, "new_tier": data["tier"]
             })
         except Exception as e:
             print(f"❌ Loser uid:{uid} update fail:", e)
 
+    # Nickname refresh
     try:
         await update_nicknames_for_users(guild, [p["uid"] for p in winner_details + loser_details])
     except Exception as e:
         print("⚠️ nickname update error:", e)
 
+    # Match log
     try:
         print("✅ insert_match эхэлж байна...")
         await clear_last_match()
@@ -1126,7 +1349,7 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
         print("✅ insert_match амжилттай дууслаа")
     except Exception as e:
         print("❌ Match log алдаа:", e)
-        traceback.print_exc()  # 👉 алдааг дэлгэрэнгүй хэвлэ
+        traceback.print_exc()
 
     session["last_win_time"] = now.isoformat()
     try:
@@ -1134,69 +1357,19 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     except Exception as e:
         print("❌ session save алдаа:", e)
 
-    # 🧾 Message
-    win_str = ", ".join(f"{i+1}-р баг" for i in win_indexes)
-    lose_str = ", ".join(f"{i+1}-р баг" for i in lose_indexes)
-    lines = [f"🏆 {win_str} ялж {lose_str} ялагдлаа.\nОноо, Tier шинэчлэгдлээ."]
-
-    if winner_details:
-        lines.append("")
-        lines.append("✅ **Ялсан тоглогчид:**")
-        for p in winner_details:
-            try:
-                old_tier = p.get("old_tier", "4-1")
-                new_tier = p.get("new_tier", "4-1")
-                old_score = p.get("old_score", 0)
-                new_score = p.get("new_score", 0)
-                uid = p["uid"]
-
-                if old_tier not in TIER_ORDER or new_tier not in TIER_ORDER:
-                    continue
-
-                change = "⬆" if TIER_ORDER.index(new_tier) < TIER_ORDER.index(old_tier) else (
-                        "⬇" if TIER_ORDER.index(new_tier) > TIER_ORDER.index(old_tier) else "")
-
-                lines.append(f"- <@{uid}>: `{old_score} → {new_score}` (Tier: `{old_tier} → {new_tier}`) {change}")
-            except Exception as e:
-                print("❌ winner_details render алдаа:", e)
-
-    if loser_details:
-        lines.append("")
-        lines.append("💀 **Ялагдсан тоглогчид:**")
-        for p in loser_details:
-            try:
-                old_tier = p.get("old_tier", "4-1")
-                new_tier = p.get("new_tier", "4-1")
-                old_score = p.get("old_score", 0)
-                new_score = p.get("new_score", 0)
-                uid = p["uid"]
-
-                if old_tier not in TIER_ORDER or new_tier not in TIER_ORDER:
-                    continue
-
-                change = "⬆" if TIER_ORDER.index(new_tier) < TIER_ORDER.index(old_tier) else (
-                        "⬇" if TIER_ORDER.index(new_tier) > TIER_ORDER.index(old_tier) else "")
-
-                lines.append(f"- <@{uid}>: `{old_score} → {new_score}` (Tier: `{old_tier} → {new_tier}`) {change}")
-            except Exception as e:
-                print("❌ loser_details render алдаа:", e)
-
-    lines.append("✅ Match бүртгэгдлээ.")
-
-    # ✅ Хэт урт мессежийг хэсэгчилж илгээнэ
-    chunks = []
-    current = ""
-    for line in lines:
-        if len(current) + len(line) + 1 > 1900:
-            chunks.append(current)
-            current = ""
-        current += line + "\n"
-    if current:
-        chunks.append(current)
-
+    # Render
     try:
-        for chunk in chunks:
-            await interaction.followup.send(chunk)
+        await send_match_result_embed(
+            interaction,
+            mode_label="Normal",
+            ranked=ranked,
+            win_indexes=win_indexes,
+            lose_indexes=lose_indexes,
+            winner_details=winner_details,
+            loser_details=loser_details,
+            session=session,
+            weights_map={}  # хүсвэл weights dict өгч болно
+        )
     except Exception:
         traceback.print_exc()
 
@@ -1239,9 +1412,12 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
         return
 
     winners = [uid for i in win_indexes for uid in all_teams[i]]
-    losers = [uid for i in lose_indexes for uid in all_teams[i]]
+    losers  = [uid for i in lose_indexes for uid in all_teams[i]]
     now = datetime.now(timezone.utc)
     guild = interaction.guild
+
+    # 🆕 scores-д default үүсгэнэ
+    await ensure_scores_for_users(guild, list(set(winners + losers)))
 
     def validate_tier(tier): return tier if tier in TIER_ORDER else "4-1"
     def adjust_score(data, delta):
@@ -1268,7 +1444,12 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
                 data = adjust_score(data, +2)
                 await upsert_score(uid, data["score"], data["tier"], username)
                 await update_player_stats(uid, is_win=True)
-                await log_score_result(uid, "win")  # ⬅️ нэмэх
+
+            # 🆕 PERF LOG
+            try:
+                await log_score_result(uid, "win")
+            except Exception as e:
+                print("⚠️ log_score_result(win) алдаа:", e)
 
             winner_details.append({
                 "uid": uid, "username": username,
@@ -1291,7 +1472,12 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
                 data = adjust_score(data, -2)
                 await upsert_score(uid, data["score"], data["tier"], username)
                 await update_player_stats(uid, is_win=False)
-                await log_score_result(uid, "loss")  # ⬅️ нэмэх
+
+            # 🆕 PERF LOG
+            try:
+                await log_score_result(uid, "loss")
+            except Exception as e:
+                print("⚠️ log_score_result(loss) алдаа:", e)
 
             loser_details.append({
                 "uid": uid, "username": username,
@@ -1330,52 +1516,21 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
     except Exception as e:
         print("❌ session save алдаа:", e)
 
-    # ✅ Message render
-    win_str = ", ".join(f"{i+1}-р баг" for i in win_indexes)
-    lose_str = ", ".join(f"{i+1}-р баг" for i in lose_indexes)
-    lines = [f"💦 {win_str} Fountain ялж {lose_str} ялагдлаа.\nОноо, Tier шинэчлэгдлээ."]
-
-    def render_line(p, symbol):
-        old_tier, new_tier = p.get("old_tier", "4-1"), p.get("new_tier", "4-1")
-        old_score, new_score = p.get("old_score", 0), p.get("new_score", 0)
-        uid = p["uid"]
-        if old_tier not in TIER_ORDER or new_tier not in TIER_ORDER:
-            return None
-        change = "⬆" if TIER_ORDER.index(new_tier) < TIER_ORDER.index(old_tier) else (
-                 "⬇" if TIER_ORDER.index(new_tier) > TIER_ORDER.index(old_tier) else "")
-        return f"- <@{uid}>: `{old_score} → {new_score}` (Tier: `{old_tier} → {new_tier}`) {change}"
-
-    if winner_details:
-        lines.append("")
-        lines.append("✅ **Ялсан тоглогчид:**")
-        for p in winner_details:
-            line = render_line(p, "✅")
-            if line:
-                lines.append(line)
-
-    if loser_details:
-        lines.append("")
-        lines.append("💀 **Ялагдсан тоглогчид:**")
-        for p in loser_details:
-            line = render_line(p, "💀")
-            if line:
-                lines.append(line)
-
-    lines.append("✅ Match бүртгэгдлээ.")
-
-    # ✅ Хэт урт мессежийг хэсэгчилж илгээнэ
-    chunks = []
-    current = ""
-    for line in lines:
-        if len(current) + len(line) + 1 > 1900:
-            chunks.append(current)
-            current = ""
-        current += line + "\n"
-    if current:
-        chunks.append(current)
-
-    for chunk in chunks:
-        await interaction.followup.send(chunk)
+    # Render
+    try:
+        await send_match_result_embed(
+            interaction,
+            mode_label="Fountain",
+            ranked=ranked,
+            win_indexes=win_indexes,
+            lose_indexes=lose_indexes,
+            winner_details=winner_details,
+            loser_details=loser_details,
+            session=session,
+            weights_map={}  # хүсвэл weights dict өгч болно
+        )
+    except Exception:
+        traceback.print_exc()
 
 @bot.tree.command(name="change_player", description="Багийн гишүүдийг солих")
 @app_commands.describe(
@@ -1932,7 +2087,7 @@ async def match_history(interaction: discord.Interaction):
             LIMIT 5
         """)
         await conn.close()
-    except Exception as e:
+    except Exception:
         import traceback
         traceback.print_exc()
         await interaction.followup.send("❌ Match унших үед алдаа гарлаа.")
@@ -1943,22 +2098,51 @@ async def match_history(interaction: discord.Interaction):
         return
 
     lines = ["📜 **Сүүлийн Match-ууд:**"]
+
+    import json
+    from datetime import timezone, timedelta
+
+    def ensure_list(x):
+        if x is None:
+            return []
+        if isinstance(x, (list, tuple)):
+            return list(x)
+        if isinstance(x, str):
+            try:
+                v = json.loads(x)
+                return v if isinstance(v, list) else []
+            except Exception:
+                return []
+        return []
+
     for i, row in enumerate(rows, 1):
         ts = row["timestamp"]
-        dt = ts.astimezone(timezone(timedelta(hours=8)))
-        ts_str = dt.strftime("%Y-%m-%d %H:%M")
+        # tzinfo байхгүй timestamp ирвэл UTC гэж үзэж онооно
+        try:
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        except Exception:
+            # Ховор тохиолдолд ts нь datetime биш байвал алгасна
+            pass
 
-        mode = row["mode"]
-        strategy = row["strategy"]
+        try:
+            dt = ts.astimezone(timezone(timedelta(hours=8)))
+            ts_str = dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            ts_str = str(ts)
+
+        mode = (row["mode"] or "").upper()
+        strategy = row["strategy"] or "?"
         initiator = f"<@{row['initiator_id']}>"
-        winners = row["winners"] or []
-        losers = row["losers"] or []
 
-        win_str = ", ".join(f"<@{uid}>" for uid in winners)
-        lose_str = ", ".join(f"<@{uid}>" for uid in losers)
+        winners = ensure_list(row["winners"])
+        losers = ensure_list(row["losers"])
+
+        win_str = ", ".join(f"<@{uid}>" for uid in winners) if winners else "—"
+        lose_str = ", ".join(f"<@{uid}>" for uid in losers) if losers else "—"
 
         lines.append(
-            f"\n**#{i} | {mode.upper()} | 🧠 `{strategy}` | 🕓 {ts_str}** — {initiator}\n"
+            f"\n**#{i} | {mode} | 🧠 `{strategy}` | 🕓 {ts_str}** — {initiator}\n"
             f"🏆 Winner: {win_str}\n"
             f"💀 Loser: {lose_str}"
         )
@@ -1982,6 +2166,145 @@ async def resync(interaction: discord.Interaction):
     except Exception as e:
         print("❌ resync алдаа:", e)
         await interaction.followup.send("⚠️ Комманд sync хийх үед алдаа гарлаа.", ephemeral=True)
+
+@bot.tree.command(name="diag", description="Админ: орчны онош")
+async def diag(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("⛔️ Зөвхөн админ.", ephemeral=True); return
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except discord.errors.InteractionResponded:
+        return
+
+    # DB
+    db_ok, db_msg = False, ""
+    try:
+        conn = await connect()
+        await conn.execute("SELECT 1")
+        await conn.close()
+        db_ok, db_msg = True, "DB OK"
+    except Exception as e:
+        db_msg = f"DB FAIL: {e}"
+
+    # OpenAI (жижиг JSON test)
+    ai_ok, ai_msg = False, ""
+    try:
+        import json
+        from openai import OpenAI
+        client = OpenAI()
+        r = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role":"user","content":"Return {\"ok\":true} as JSON only"}],
+            temperature=0,
+            response_format={"type":"json_object"},
+            max_tokens=16,
+        )
+        _ = json.loads(r.choices[0].message.content)
+        ai_ok, ai_msg = True, "OpenAI OK"
+    except Exception as e:
+        ai_msg = f"OpenAI FAIL: {e}"
+
+    # Perms (nickname edit)
+    me = interaction.guild.me
+    perm_ok = interaction.guild.me.guild_permissions.manage_nicknames
+    perm_msg = "Nick perm OK" if perm_ok else "Nick perm MISSING"
+
+    await interaction.followup.send(
+        f"🩺 DIAG\n• {db_msg}\n• {ai_msg}\n• {perm_msg}",
+        ephemeral=True
+    )
+
+@bot.tree.command(name="diag_dryrun", description="Админ: DRY-RUN оношилгоо (ямар ч өгөгдөл хадгалахгүй)")
+@app_commands.describe(
+    mode='Балансын тест: "mock" (анхдагч) эсвэл "real" (GPT дуудна, хадгалж үлдээхгүй)'
+)
+async def diag_dryrun(interaction: discord.Interaction, mode: str = "mock"):
+    # 1) зөвшөөрөл
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("⛔️ Зөвхөн админ.", ephemeral=True)
+        return
+    try:
+        await interaction.response.defer(ephemeral=True)
+    except discord.errors.InteractionResponded:
+        return
+
+    messages = []
+
+    # 2) DB DRY-RUN — TEMP TABLE ашигладаг тул ямар ч ул мөр үлдэхгүй
+    db_ok, db_msg = False, ""
+    try:
+        from database import connect
+        conn = await connect()  # asyncpg.connect(DATABASE_URL) ашигладаг:contentReference[oaicite:1]{index=1}
+        try:
+            async with conn.transaction():
+                await conn.execute("CREATE TEMP TABLE z_diag(x int);")
+                await conn.execute("INSERT INTO z_diag(x) VALUES (1),(2),(3);")
+                cnt = await conn.fetchval("SELECT COUNT(*) FROM z_diag;")
+                db_ok = (cnt == 3)
+            # TEMP TABLE нь transaction-оос хамааралгүйгээр сешн дуусмагц устна
+            db_msg = "DB OK (temp write/read ажиллалаа)" if db_ok else "DB WARN (unexpected count)"
+        finally:
+            await conn.close()
+    except Exception as e:
+        db_msg = f"DB FAIL: {e}"
+    messages.append(f"• {db_msg}")
+
+    # 3) OpenAI DRY-RUN — жижиг JSON тест
+    ai_ok, ai_msg = False, ""
+    try:
+        from openai import OpenAI
+        client = OpenAI()
+        resp = await client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": "Return {\"ok\":true} as JSON only"}],
+            temperature=0,
+            max_tokens=16,
+            # Хэрвээ танай орчинд response_format дэмжихгүй бол try/except-оор унтрааж болно
+            response_format={"type": "json_object"},
+        )
+        _ = json.loads(resp.choices[0].message.content)
+        ai_ok, ai_msg = True, "OpenAI OK"
+    except Exception as e:
+        ai_msg = f"OpenAI FAIL: {e}"
+    messages.append(f"• {ai_msg}")
+
+    # 4) Discord permission — nickname edit
+    me = interaction.guild.me
+    can_nick = bool(me.guild_permissions.manage_nicknames)
+    perm_msg = "Nick perm OK" if can_nick else "Nick perm MISSING"
+    messages.append(f"• {perm_msg}")
+
+    # 5) Балансын DRY‑RUN (хуудуун GPT MOCK эсвэл бодитоор GPT дуудаад хадгалалгүй харуулна)
+    try:
+        # Жин үүсгэх: 10 тоглогч, 2 баг * 5 хүн
+        team_count, players_per_team = 2, 5
+        fake_players = [{"id": 10_000 + i, "power": random.randint(20, 120)} for i in range(team_count*players_per_team)]
+        weights = {p["id"]: p["power"] for p in fake_players}
+
+        if mode.lower() == "real":
+            # бодитоор GPT-ээс баг авна (teams), ГЭХДЭЭ хадгалахгүй
+            teams = await call_gpt_balance_api(team_count, players_per_team, fake_players)  # таны одоогийн функц:contentReference[oaicite:2]{index=2}
+            # локал сайжруулалт (swap) — илүү сайн баланс
+            teams, cost = local_refine(teams, weights, max_rounds=100)  # таны функц:contentReference[oaicite:3]{index=3}
+            mode_note = f"gpt+local_refine (diff={max(sum(weights.get(u,0) for u in t) for t in teams) - min(sum(weights.get(u,0) for u in t) for t in teams)})"
+        else:
+            # MOCK: greedy эсвэл reflector ашиглаж түр хөрвүүлээд (кодод чинь бий):contentReference[oaicite:4]{index=4}
+            teams = greedy_teams(weights, team_count, players_per_team)
+            teams, cost = local_refine(teams, weights, max_rounds=100)
+            mode_note = f"mock+local_refine (diff={cost})"
+
+        # Хариуг зөвхөн шалгах зорилгоор харуулна — DB/session ТООРХОЙЛТ ХИЙХГҮЙ
+        totals = [sum(weights.get(uid,0) for uid in t) for t in teams]
+        lines = [f"🧪 Balance DRY‑RUN — {mode_note}",
+                 f"Totals: {totals} (min={min(totals)}, max={max(totals)})"]
+        for i, t in enumerate(teams, 1):
+            lines.append(f"#{i} → " + ", ".join(f"{uid}:{weights[uid]}" for uid in t))
+        messages.append("\n".join(lines))
+    except Exception as e:
+        messages.append(f"• Balance DRY‑RUN FAIL: {e}")
+
+    # 6) Эцсийн тайлан (эпhemeral)
+    await interaction.followup.send("🩺 **DRY‑RUN DIAG**\n" + "\n".join(messages), ephemeral=True)
 
 # 🎯 Run
 async def main():
