@@ -614,6 +614,66 @@ async def _fmt_member_line(guild, uid: int, w: int | None, is_leader: bool) -> s
     wtxt = f" ({w})" if w is not None else ""
     return f"- <@{uid}>{wtxt}{leader}"
 
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
+
+async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
+    W, H = 1200, 500
+    # --- Gradient background
+    base = Image.new("RGB", (W, H), "#0f172a")
+    top  = Image.new("RGB", (W, H), "#1e293b")
+    mask = Image.linear_gradient("L").resize((W, H))
+    bg   = Image.composite(top, base, mask).filter(ImageFilter.GaussianBlur(2))
+
+    draw = ImageDraw.Draw(bg)
+
+    # --- Avatar (цэгцтэй дугуйлж авна)
+    try:
+      avatar_bytes = await member.display_avatar.read()  # discord.py v2
+    except Exception:
+      avatar_bytes = None
+    if avatar_bytes:
+      ava = Image.open(BytesIO(avatar_bytes)).convert("RGB").resize((220,220))
+      mask = Image.new("L", (220,220), 0)
+      ImageDraw.Draw(mask).ellipse((0,0,220,220), fill=255)
+      bg.paste(ava, (80, H//2 - 110), mask)
+
+    # --- Texts
+    def load_font(size):
+        # өөрийн сервер дээрх font замаа тавибал илүү гоё. fallback:
+        try:
+            return ImageFont.truetype("fonts/Inter-Bold.ttf", size)
+        except:
+            return ImageFont.load_default()
+
+    f_big   = load_font(64)
+    f_mid   = load_font(42)
+    f_small = load_font(28)
+
+    name   = member.display_name
+    amount = f"{amount_mnt:,}₮"
+    title  = "🎉 NEW DONATOR!"
+    line1  = f"{name}"
+    line2  = f"+{amount} дэмжлэг"
+
+    # зүүн талын чимэглэл
+    draw.rounded_rectangle((40, 40, 20, H-40), radius=10, fill="#22c55e")
+
+    # text block
+    x0 = 340
+    draw.text((x0, 140), title,  font=f_small, fill="#a3e635")
+    draw.text((x0, 200), line1,  font=f_big,   fill="white")
+    draw.text((x0, 280), line2,  font=f_mid,   fill="#93c5fd")
+    draw.text((x0, 350), "Танд баярлалаа! ❤️", font=f_small, fill="#eab308")
+
+    # footer (server нэр, огноо гэх мэт хүсвэл)
+    # draw.text((x0, 410), f"{member.guild.name}", font=f_small, fill="#cbd5e1")
+
+    buf = BytesIO()
+    buf.seek(0)
+    bg.save(buf, format="PNG", optimize=True)
+    buf.seek(0)
+    return buf
 
 
 def _split_fields(lines: List[str], per_field: int = 10) -> List[str]:
@@ -1904,26 +1964,37 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
     await interaction.followup.send("✅ Оноо шинэчлэгдлээ:\n" + "\n".join(lines))
 
 @bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
-@app_commands.describe(
-    member="Donator болгох хэрэглэгч",
-    mnt="Хандивласан мөнгө (₮)"
-)
+@app_commands.describe(member="Donator болгох хэрэглэгч", mnt="Хандивласан мөнгө (₮)")
 async def add_donator(interaction: discord.Interaction, member: discord.Member, mnt: int):
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ Энэ командыг зөвхөн админ хэрэглэгч ажиллуулж чадна.", ephemeral=True)
-        return
+        return await interaction.response.send_message("❌ Энэ командыг зөвхөн админ хэрэглэгч ажиллуулж чадна.", ephemeral=True)
 
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
-        return
+        pass
 
+    # 1) DB update + nickname refresh чинь хэвээр:
     await upsert_donator(member.id, mnt)
     await update_nicknames_for_users(interaction.guild, [member.id])
 
-    await interaction.followup.send(
-        f"🎉 {member.mention} хэрэглэгчийг Donator болголоо! (+{mnt:,}₮ нэмэгдлээ)"
-    )
+    # 2) Donor card зураад илгээнэ
+    try:
+        img = await render_donor_card(member, mnt)
+        file = discord.File(img, filename="donor_card.png")
+        emb = discord.Embed(
+            title="💖 Donator Update",
+            description=f"{member.mention} хэрэглэгч {mnt:,}₮ дэмжлэг илгээлээ!",
+            color=0xFFD700
+        )
+        emb.set_image(url="attachment://donor_card.png")
+        await interaction.followup.send(file=file, embed=emb)
+    except Exception as e:
+        print("⚠️ donor card render алдаа:", e)
+        await interaction.followup.send(
+            f"🎉 {member.mention} хэрэглэгчийг Donator болголоо! (+{mnt:,}₮)",
+        )
+
 
 @bot.tree.command(name="donator_list", description="Donator хэрэглэгчдийн жагсаалт")
 async def donator_list(interaction: discord.Interaction):
