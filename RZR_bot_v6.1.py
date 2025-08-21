@@ -630,52 +630,133 @@ def load_font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default()
 
 async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
-    W, H = 1000, 400
+    # --- хэмжээ ---
+    W, H = 1200, 540   # арай өндөр: илүү “banner” мэдрэмж
+    PAD = 56
 
-    # --- background (dark + зөөлөн градиент) ---
-    bg = Image.new("RGB", (W, H), (15, 23, 42))  # slate-900
-    grad = Image.new("L", (1, H))
+    # --- фон: гүн градиент + зөөлөн vignette ---
+    bg = Image.new("RGB", (W, H), (9, 14, 28))  # #090E1C
+    grad = Image.new("RGB", (W, H), 0)
+    px = grad.load()
+    c1, c2 = (10, 24, 61), (20, 36, 74)  # цэнхэр-сапфир
     for y in range(H):
-        grad.putpixel((0, y), int(255 * (y / (H - 1))))
-    grad = grad.resize((W, H))
-    overlay = Image.new("RGB", (W, H), (30, 41, 59))  # slate-800
-    bg = Image.composite(overlay, bg, grad).filter(ImageFilter.GaussianBlur(1))
+        t = y / (H-1)
+        r = int(c1[0]*(1-t) + c2[0]*t)
+        g = int(c1[1]*(1-t) + c2[1]*t)
+        b = int(c1[2]*(1-t) + c2[2]*t)
+        for x in range(W):
+            px[x, y] = (r, g, b)
+    bg = Image.blend(bg, grad, 0.85)
+
+    # vignette
+    v = Image.new("L", (W, H), 0)
+    dv = ImageDraw.Draw(v)
+    dv.ellipse((-W*0.15, -H*0.4, W*1.15, H*1.4), fill=255)
+    v = v.filter(ImageFilter.GaussianBlur(180))
+    vignette = Image.new("RGB", (W, H), (0, 0, 0))
+    bg = Image.composite(bg, vignette, ImageOps.invert(v))
 
     draw = ImageDraw.Draw(bg)
 
-    # --- avatar ---
-    AV_DRAW = 180               # карт дээрх бодит хэмжээ
-    REQ_SIZE = 256              # Discord asset size: 2^n (16..4096) -> 256 OK
+    # --- card стекло эффект ---
+    card_w, card_h = W - PAD*2, H - PAD*2
+    card_x, card_y = PAD, PAD
+    shadow = Image.new("RGBA", (card_w+40, card_h+40), (0,0,0,0))
+    sd = ImageDraw.Draw(shadow)
+    sd.rounded_rectangle((20,20,card_w+20,card_h+20), radius=40, fill=(0,0,0,180))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(30))
+    bg.paste(shadow, (card_x-20, card_y-20), shadow)
+
+    glass = Image.new("RGBA", (card_w, card_h), (255,255,255,28))
+    mask = Image.new("L", (card_w, card_h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0,0,card_w,card_h), radius=40, fill=255)
+    bg.paste(glass, (card_x, card_y), mask)
+
+    # --- avatar (том, дугуй хүрээтэй glow) ---
+    AV = 220
+    REQ = 256  # discord asset size (2-ын зэрэгт)
     try:
-        avatar_asset = member.display_avatar.replace(size=REQ_SIZE)
-        data = await avatar_asset.read()
+        asset = member.display_avatar.replace(size=REQ)
+        data = await asset.read()
         av = Image.open(BytesIO(data)).convert("RGBA")
     except Exception:
-        av = Image.new("RGBA", (REQ_SIZE, REQ_SIZE), (200, 200, 200, 255))
+        av = Image.new("RGBA", (REQ, REQ), (200,200,200,255))
 
-    av = ImageOps.fit(av, (AV_DRAW, AV_DRAW), method=Image.LANCZOS)
-    mask_av = Image.new("L", (AV_DRAW, AV_DRAW), 0)
-    ImageDraw.Draw(mask_av).ellipse([0, 0, AV_DRAW, AV_DRAW], fill=255)
-    bg.paste(av, (60, (H - AV_DRAW) // 2), mask_av)
+    av = ImageOps.fit(av, (AV, AV), method=Image.LANCZOS)
 
-    # --- texts ---
-    name_font = load_font(48)
-    money_font = load_font(64)
+    # ring
+    ring = Image.new("RGBA", (AV+24, AV+24), (0,0,0,0))
+    rdraw = ImageDraw.Draw(ring)
+    rdraw.ellipse((0,0,AV+24,AV+24), fill=(34,197,94,48))      # #22c55e бага ил тод
+    rdraw.ellipse((12,12,AV+12,AV+12), fill=(0,0,0,0))
+    ring = ring.filter(ImageFilter.GaussianBlur(8))
 
-    display_name = member.global_name or member.display_name or member.name
-    draw.text((280, 120), display_name, font=name_font, fill=(255, 255, 255))
+    av_x = card_x + 48
+    av_y = card_y + (card_h-AV)//2
+    bg.paste(ring, (av_x-12, av_y-12), ring)
 
+    mask_av = Image.new("L", (AV, AV), 0)
+    ImageDraw.Draw(mask_av).ellipse((0,0,AV,AV), fill=255)
+    bg.paste(av, (av_x, av_y), mask_av)
+
+    # --- текст тохиргоо ---
+    title_font = load_font(34)
+    name_font  = load_font(72)   # том
+    money_font = load_font(88)   # бүр том
+
+    # util: өргөнд багтаан тайрах
+    def fit_text(text, font, max_w):
+        while True:
+            bbox = draw.textbbox((0,0), text, font=font, stroke_width=2)
+            if bbox[2]-bbox[0] <= max_w or len(text) <= 1:
+                return text
+            text = text[:-1]
+
+    # байрлалын суурь
+    left = av_x + AV + 48
+    right = card_x + card_w - 48
+    max_w = right - left
+
+    # Title
+    draw.text((left, card_y+42), "NEW DONATOR", font=title_font,
+              fill=(203,213,225), stroke_width=1, stroke_fill=(0,0,0,120))
+
+    # Amount (capsule)
     amount_text = format_mnt(amount_mnt)
-    bbox = draw.textbbox((0, 0), amount_text, font=money_font)
-    pill_w = (bbox[2] - bbox[0]) + 40
-    pill_h = (bbox[3] - bbox[1]) + 20
-    px, py = 280, 200
+    abox = draw.textbbox((0,0), amount_text, font=money_font, stroke_width=2)
+    aw, ah = (abox[2]-abox[0]), (abox[3]-abox[1])
+    pill_pad_x, pill_pad_y = 28, 14
+    pill_w, pill_h = min(max_w, aw + pill_pad_x*2), ah + pill_pad_y*2
+    px = left
+    py = card_y + card_h - pill_h - 48
 
-    # pill bg (rounded rectangle)
-    draw.rounded_rectangle((px, py, px + pill_w, py + pill_h), radius=25, fill=(34, 197, 94))
-    draw.text((px + 20, py + 10), amount_text, font=money_font, fill=(255, 255, 255))
+    # pill bg
+    pill_img = Image.new("RGBA", (pill_w, pill_h), (34, 197, 94, 230))
+    ImageDraw.Draw(pill_img).rounded_rectangle((0,0,pill_w,pill_h), radius=28,
+                                               fill=(34,197,94,230))
+    # subtle inner shine
+    shine = Image.new("RGBA", (pill_w, pill_h//2), (255,255,255,30))
+    pill_img.paste(shine, (0,0), shine)
+    bg.paste(pill_img, (px, py), pill_img)
 
-    # --- save ---
+    # pill text
+    draw.text((px + pill_pad_x, py + pill_pad_y - 6), amount_text, font=money_font,
+              fill=(255,255,255), stroke_width=2, stroke_fill=(0,0,0,100))
+
+    # Name (pill-ээс дээш, тод stroke-той)
+    display_name = member.global_name or member.display_name or member.name
+    name_txt = fit_text(display_name, name_font, max_w)
+    draw.text((left, py - 24 - name_font.size), name_txt, font=name_font,
+              fill=(248,250,252), stroke_width=3, stroke_fill=(0,0,0,140))
+
+    # — жижиг баярлалаа шугам
+    sub = "Thank you for supporting our community!"
+    sub_font = load_font(30)
+    sub_txt = fit_text(sub, sub_font, max_w)
+    draw.text((left, py + pill_h + 14), sub_txt, font=sub_font,
+              fill=(203,213,225), stroke_width=1, stroke_fill=(0,0,0,120))
+
+    # --- экспорт ---
     buf = BytesIO()
     bg.save(buf, format="PNG", optimize=True)
     buf.seek(0)
