@@ -18,7 +18,7 @@ from typing import List, Dict
 import math, random, os, PIL
 from typing import Dict, List
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageFont, ImageChops
+from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageFont, ImageChops, __file__ as PIL_FILE
 from io import BytesIO
 
 
@@ -621,10 +621,22 @@ async def _fmt_member_line(guild, uid: int, w: int | None, is_leader: bool) -> s
 def format_mnt(amount: int) -> str:
     return f"{amount:,}₮".replace(",", " ")
 
-def _font(size: int, bold=False) -> ImageFont.FreeTypeFont:
-    base = os.path.join(os.path.dirname(PIL.__file__), "fonts")
-    fname = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-    return ImageFont.truetype(os.path.join(base, fname), size)
+# --- REPLACE this function ---
+def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    root = Path(__file__).resolve().parent
+    candidates = [
+        root / "assets" / "fonts" / ("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"),
+        Path(PIL_FILE).parent / "fonts" / ("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+    ]
+    for p in candidates:
+        try:
+            return ImageFont.truetype(str(p), size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
 
 def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     """
