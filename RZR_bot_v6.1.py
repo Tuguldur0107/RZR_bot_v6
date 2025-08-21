@@ -617,64 +617,70 @@ async def _fmt_member_line(guild, uid: int, w: int | None, is_leader: bool) -> s
 def format_mnt(amount: int) -> str:
     return f"{amount:,}₮".replace(",", " ")
 
-def load_font(size: int) -> ImageFont.FreeTypeFont:
-    """Фонт ачаалах – системээс олдохгүй бол default."""
-    for path in [
-        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    ]:
-        try:
-            return ImageFont.truetype(path, size)
-        except Exception:
-            continue
-    return ImageFont.load_default()
+def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    """
+    PIL багц доторх DejaVuSans(.ttf) – үргэлж байдаг.
+    bold=True бол DejaVuSans-Bold.ttf
+    """
+    try:
+        import os
+        import PIL
+        pil_dir = os.path.dirname(PIL.__file__)
+        fname = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+        path = os.path.join(pil_dir, "fonts", fname)
+        return ImageFont.truetype(path, size)
+    except Exception:
+        # heт fallback: системийн ерөнхий замуудаас оролдоно
+        for p in [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        ]:
+            try:
+                return ImageFont.truetype(p, size)
+            except Exception:
+                continue
+        # хамгийн сүүлийн fallback (bitmap – жижиг харагдаж магадгүй)
+        return ImageFont.load_default()
+
 
 async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
-    # --- хэмжээ ---
-    W, H = 1200, 540   # арай өндөр: илүү “banner” мэдрэмж
-    PAD = 56
+    # --- Canvas ---
+    W, H = 1100, 480
+    PAD = 40
 
-    # --- фон: гүн градиент + зөөлөн vignette ---
-    bg = Image.new("RGB", (W, H), (9, 14, 28))  # #090E1C
-    grad = Image.new("RGB", (W, H), 0)
-    px = grad.load()
-    c1, c2 = (10, 24, 61), (20, 36, 74)  # цэнхэр-сапфир
+    # Background: хөх-нойтон градиент + зөөлөн blur
+    bg = Image.new("RGB", (W, H), (9, 14, 28))
+    grad = Image.new("RGB", (1, H))
+    gpx = grad.load()
+    top, bot = (22, 33, 62), (10, 20, 48)
     for y in range(H):
-        t = y / (H-1)
-        r = int(c1[0]*(1-t) + c2[0]*t)
-        g = int(c1[1]*(1-t) + c2[1]*t)
-        b = int(c1[2]*(1-t) + c2[2]*t)
-        for x in range(W):
-            px[x, y] = (r, g, b)
-    bg = Image.blend(bg, grad, 0.85)
-
-    # vignette
-    v = Image.new("L", (W, H), 0)
-    dv = ImageDraw.Draw(v)
-    dv.ellipse((-W*0.15, -H*0.4, W*1.15, H*1.4), fill=255)
-    v = v.filter(ImageFilter.GaussianBlur(180))
-    vignette = Image.new("RGB", (W, H), (0, 0, 0))
-    bg = Image.composite(bg, vignette, ImageOps.invert(v))
+        t = y/(H-1)
+        gpx[0, y] = (
+            int(top[0]*(1-t)+bot[0]*t),
+            int(top[1]*(1-t)+bot[1]*t),
+            int(top[2]*(1-t)+bot[2]*t),
+        )
+    grad = grad.resize((W, H))
+    bg = Image.blend(bg, grad, 0.9).filter(ImageFilter.GaussianBlur(0.7))
 
     draw = ImageDraw.Draw(bg)
 
-    # --- card стекло эффект ---
+    # Card panel (glass)
     card_w, card_h = W - PAD*2, H - PAD*2
-    card_x, card_y = PAD, PAD
-    shadow = Image.new("RGBA", (card_w+40, card_h+40), (0,0,0,0))
-    sd = ImageDraw.Draw(shadow)
-    sd.rounded_rectangle((20,20,card_w+20,card_h+20), radius=40, fill=(0,0,0,180))
-    shadow = shadow.filter(ImageFilter.GaussianBlur(30))
-    bg.paste(shadow, (card_x-20, card_y-20), shadow)
-
-    glass = Image.new("RGBA", (card_w, card_h), (255,255,255,28))
+    card = Image.new("RGBA", (card_w, card_h), (255,255,255,20))
     mask = Image.new("L", (card_w, card_h), 0)
-    ImageDraw.Draw(mask).rounded_rectangle((0,0,card_w,card_h), radius=40, fill=255)
-    bg.paste(glass, (card_x, card_y), mask)
+    ImageDraw.Draw(mask).rounded_rectangle((0,0,card_w,card_h), radius=28, fill=255)
+    # shadow
+    sh = Image.new("RGBA", (card_w+30, card_h+30), (0,0,0,0))
+    sd = ImageDraw.Draw(sh)
+    sd.rounded_rectangle((15,15,card_w+15,card_h+15), radius=28, fill=(0,0,0,130))
+    sh = sh.filter(ImageFilter.GaussianBlur(18))
+    bg.paste(sh, (PAD-15, PAD-15), sh)
+    bg.paste(card, (PAD, PAD), mask)
 
-    # --- avatar (том, дугуй хүрээтэй glow) ---
-    AV = 220
-    REQ = 256  # discord asset size (2-ын зэрэгт)
+    # Avatar
+    AV = 200
+    REQ = 256   # Discord asset size нь 2^n байх ёстой
     try:
         asset = member.display_avatar.replace(size=REQ)
         data = await asset.read()
@@ -684,83 +690,82 @@ async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
 
     av = ImageOps.fit(av, (AV, AV), method=Image.LANCZOS)
 
-    # ring
-    ring = Image.new("RGBA", (AV+24, AV+24), (0,0,0,0))
-    rdraw = ImageDraw.Draw(ring)
-    rdraw.ellipse((0,0,AV+24,AV+24), fill=(34,197,94,48))      # #22c55e бага ил тод
-    rdraw.ellipse((12,12,AV+12,AV+12), fill=(0,0,0,0))
-    ring = ring.filter(ImageFilter.GaussianBlur(8))
+    # avatar ring + glow
+    ring = Image.new("RGBA", (AV+18, AV+18), (0,0,0,0))
+    rd = ImageDraw.Draw(ring)
+    rd.ellipse((0,0,AV+18,AV+18), fill=(34,197,94,70))       # #22c55e
+    rd.ellipse((9,9,AV+9,AV+9), fill=(0,0,0,0))
+    ring = ring.filter(ImageFilter.GaussianBlur(6))
 
-    av_x = card_x + 48
-    av_y = card_y + (card_h-AV)//2
-    bg.paste(ring, (av_x-12, av_y-12), ring)
+    av_x = PAD + 32
+    av_y = PAD + (card_h-AV)//2
+    bg.paste(ring, (av_x-9, av_y-9), ring)
+    m = Image.new("L", (AV, AV), 0)
+    ImageDraw.Draw(m).ellipse((0,0,AV,AV), fill=255)
+    bg.paste(av, (av_x, av_y), m)
 
-    mask_av = Image.new("L", (AV, AV), 0)
-    ImageDraw.Draw(mask_av).ellipse((0,0,AV,AV), fill=255)
-    bg.paste(av, (av_x, av_y), mask_av)
+    # Text fonts (Pillow DejaVu ашиглана)
+    title_f = load_font(36, bold=True)
+    name_f  = load_font(78, bold=True)
+    money_f = load_font(88, bold=True)
+    sub_f   = load_font(30, bold=False)
 
-    # --- текст тохиргоо ---
-    title_font = load_font(34)
-    name_font  = load_font(72)   # том
-    money_font = load_font(88)   # бүр том
-
-    # util: өргөнд багтаан тайрах
-    def fit_text(text, font, max_w):
-        while True:
-            bbox = draw.textbbox((0,0), text, font=font, stroke_width=2)
-            if bbox[2]-bbox[0] <= max_w or len(text) <= 1:
-                return text
-            text = text[:-1]
-
-    # байрлалын суурь
-    left = av_x + AV + 48
-    right = card_x + card_w - 48
+    # Positions
+    left = av_x + AV + 40
+    right = PAD + card_w - 40
     max_w = right - left
 
     # Title
-    draw.text((left, card_y+42), "NEW DONATOR", font=title_font,
-              fill=(203,213,225), stroke_width=1, stroke_fill=(0,0,0,120))
+    draw.text((left, PAD + 14), "NEW DONATOR", font=title_f,
+              fill=(203,213,225), stroke_width=1, stroke_fill=(0,0,0,140))
 
-    # Amount (capsule)
-    amount_text = format_mnt(amount_mnt)
-    abox = draw.textbbox((0,0), amount_text, font=money_font, stroke_width=2)
-    aw, ah = (abox[2]-abox[0]), (abox[3]-abox[1])
-    pill_pad_x, pill_pad_y = 28, 14
-    pill_w, pill_h = min(max_w, aw + pill_pad_x*2), ah + pill_pad_y*2
-    px = left
-    py = card_y + card_h - pill_h - 48
-
-    # pill bg
-    pill_img = Image.new("RGBA", (pill_w, pill_h), (34, 197, 94, 230))
-    ImageDraw.Draw(pill_img).rounded_rectangle((0,0,pill_w,pill_h), radius=28,
-                                               fill=(34,197,94,230))
-    # subtle inner shine
-    shine = Image.new("RGBA", (pill_w, pill_h//2), (255,255,255,30))
-    pill_img.paste(shine, (0,0), shine)
-    bg.paste(pill_img, (px, py), pill_img)
-
-    # pill text
-    draw.text((px + pill_pad_x, py + pill_pad_y - 6), amount_text, font=money_font,
-              fill=(255,255,255), stroke_width=2, stroke_fill=(0,0,0,100))
-
-    # Name (pill-ээс дээш, тод stroke-той)
+    # Name
     display_name = member.global_name or member.display_name or member.name
-    name_txt = fit_text(display_name, name_font, max_w)
-    draw.text((left, py - 24 - name_font.size), name_txt, font=name_font,
-              fill=(248,250,252), stroke_width=3, stroke_fill=(0,0,0,140))
+    # багтаах
+    def fit(text, font):
+        t = text
+        while True:
+            box = draw.textbbox((0,0), t, font=font, stroke_width=2)
+            if box[2]-box[0] <= max_w or len(t) <= 1:
+                return t
+            t = t[:-1]
 
-    # — жижиг баярлалаа шугам
+    name_txt = fit(display_name, name_f)
+    name_y = PAD + 14 + 44  # title доор
+    draw.text((left, name_y), name_txt, font=name_f,
+              fill=(248,250,252), stroke_width=3, stroke_fill=(0,0,0,160))
+
+    # Amount pill (том, өдөөгч ногоон)
+    amount_text = format_mnt(amount_mnt)
+    abox = draw.textbbox((0,0), amount_text, font=money_f, stroke_width=2)
+    pad_x, pad_y = 34, 18
+    pill_w = min(max_w, (abox[2]-abox[0]) + pad_x*2)
+    pill_h = (abox[3]-abox[1]) + pad_y*2
+    px = left
+    py = PAD + card_h - pill_h - 30
+
+    pill = Image.new("RGBA", (pill_w, pill_h), (34,197,94,235))
+    ImageDraw.Draw(pill).rounded_rectangle((0,0,pill_w,pill_h), radius=30, fill=(34,197,94,235))
+    # Shine
+    hi = Image.new("RGBA", (pill_w, pill_h//2), (255,255,255,28))
+    pill.paste(hi, (0,0), hi)
+    bg.paste(pill, (px, py), pill)
+
+    draw.text((px + pad_x, py + pad_y - 6), amount_text, font=money_f,
+              fill=(255,255,255), stroke_width=2, stroke_fill=(0,0,0,120))
+
+    # Subtext
     sub = "Thank you for supporting our community!"
-    sub_font = load_font(30)
-    sub_txt = fit_text(sub, sub_font, max_w)
-    draw.text((left, py + pill_h + 14), sub_txt, font=sub_font,
+    sub_y = py + pill_h + 8
+    draw.text((left, sub_y), sub, font=sub_f,
               fill=(203,213,225), stroke_width=1, stroke_fill=(0,0,0,120))
 
-    # --- экспорт ---
+    # Export
     buf = BytesIO()
     bg.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
+
 
 
 def _check_send_perms(interaction: discord.Interaction):
