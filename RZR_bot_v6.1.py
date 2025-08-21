@@ -622,6 +622,17 @@ async def _fmt_member_line(guild, uid: int, w: int | None, is_leader: bool) -> s
 def format_mnt(amount: int) -> str:
     return f"{amount:,}₮".replace(",", " ")
 
+def _sanitize_name_for_card(text: str) -> str:
+    import unicodedata
+    # Compatibility normalize → фэнси үсгүүд A,B,... болж хувирна
+    s = unicodedata.normalize("NFKC", text or "")
+    # zero-width / variation selector-уудыг авч хаяна
+    s = s.replace("\u200b","").replace("\u200d","").replace("\ufe0f","")
+    # зөвхөн үсэг, тоо, space ба аюулгүй цөөн тэмдэг үлдээнэ
+    allowed = " ._-'|()/+&[]:"
+    s = "".join(ch for ch in s if ch.isalnum() or ch in allowed)
+    return s.strip()
+
 async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
     # 1) template-ээ бэлэн болгоно
     lay = _ensure_gold_template(DONOR_BG_PATH)
@@ -658,9 +669,9 @@ async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
     draw.text((tx, ty), amount_text, font=f_amount, fill=(255,195,90))
 
     # 4) Name text (normalize хийж, фэнси тэмдэгтүүдийг цэвэрлэнэ)
-    display_name = member.global_name or member.display_name or member.name
-    display_name = unicodedata.normalize("NFC", display_name)\
-                     .replace("\u200b","").replace("\u200d","").replace("\ufe0f","")
+    display_name = _sanitize_name_for_card(
+        (member.global_name or member.display_name or member.name)
+    )
     x, y, w, h = lay["name_box"]
     f_name = _fit_font(draw, display_name, prefer=78, min_size=40, max_w=w-40, bold=True)
     tw = draw.textlength(display_name, font=f_name)
