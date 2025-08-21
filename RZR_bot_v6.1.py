@@ -676,6 +676,19 @@ async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
     buf.seek(0)
     return buf
 
+def _check_send_perms(interaction: discord.Interaction):
+    """return: ok, err_text, can_embed, can_attach"""
+    me = interaction.guild.me
+    cp = interaction.channel.permissions_for(me)
+    if not cp.send_messages:
+        return False, "⛔ Надад send_messages эрх алга.", False, False
+    # thread бол тусдаа
+    if isinstance(interaction.channel, discord.Thread):
+        if hasattr(cp, "send_messages_in_threads") and not cp.send_messages_in_threads:
+            return False, "⛔ Thread дотор мессеж бичих эрх алга.", False, False
+    return True, None, bool(getattr(cp, "embed_links", False)), bool(getattr(cp, "attach_files", False))
+
+
 def _split_fields(lines: List[str], per_field: int = 10) -> List[str]:
     return ["\n".join(lines[i:i+per_field]) for i in range(0, len(lines), per_field)]
 
@@ -1987,43 +2000,67 @@ class Donor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="add_donator", description="Хандив өгсөн Donator-ыг тэмдэглэх")
+    @app_commands.command(name="add_donator", description="Хандив нэмэх (нийт дүн дээр нэмэгдэнэ)")
     @app_commands.describe(member="Хэрэглэгч", amount_mnt="Хандивын дүн (MNT)")
-    async def add_donator(self, interaction: discord.Interaction, member: discord.Member, amount_mnt: int):
-        # Check bot perms
+    async def add_donator(
+        self,
+        interaction: discord.Interaction,
+        member: discord.Member,
+        amount_mnt: int
+    ):
+        # 0. permissions check
         me = interaction.guild.me
         perms = interaction.channel.permissions_for(me)
-        need = ["send_messages", "embed_links", "attach_files"]
-        missing = [p for p in need if not getattr(perms, p)]
-        if missing:
-            await interaction.response.send_message(
-                "⛔ Надад дараах эрх дутуу байна: " + ", ".join(missing),
-                ephemeral=True
+        if not perms.send_messages:
+            return await interaction.response.send_message(
+                "⛔ send_messages эрх дутуу байна.", ephemeral=True
             )
-            return
+
+        can_embed = perms.embed_links
+        can_attach = perms.attach_files
 
         await interaction.response.defer()
 
+        # 1. DB update
+        from database import upsert_donator
         try:
-            card = await render_donor_card(member, amount_mnt)
-            file = discord.File(card, filename="donator.png")
-            embed = discord.Embed(
-                title="🎉 Donator Added",
-                description=f"{member.mention} хандив өглөө! (+{format_mnt(amount_mnt)})",
-                color=0x22c55e
-            )
-            embed.set_image(url="attachment://donator.png")
-            await interaction.followup.send(embed=embed, file=file)
+            await upsert_donator(member.id, amount_mnt)
         except Exception as e:
-            # fallback
-            await interaction.followup.send(
-                f"🎉 {member.mention} хандив өглөө! (+{format_mnt(amount_mnt)})\n"
-                f"(зураг үүсгэхэд алдаа гарлаа)"
+            print("❌ upsert_donator fail:", e)
+            return await interaction.followup.send("⚠️ DB бичихэд алдаа гарлаа.", ephemeral=True)
+
+        # 2. Nickname update (энэ нь get_donator_emoji-г дотроо ашиглана)
+        try:
+            await update_nicknames_for_users(interaction.guild, [member.id])
+        except Exception as e:
+            print("⚠️ nickname update fail:", e)
+
+        # 3. Announce (image + fallback)
+        text = f"{member.mention} хандив өглөө! (+{format_mnt(amount_mnt)})"
+
+        file = None
+        if can_attach:
+            try:
+                img = await render_donor_card(member, amount_mnt)
+                file = discord.File(img, filename="donator.png")
+            except Exception as e:
+                print("⚠️ donor card render error:", e)
+
+        if can_embed:
+            emb = discord.Embed(
+                title="🎉 Donator Added",
+                description=text,
+                color=0x22C55E
             )
+            if file:
+                emb.set_image(url="attachment://donator.png")
+                return await interaction.followup.send(embed=emb, file=file)
+            return await interaction.followup.send(embed=emb)
 
-async def setup(bot: commands.Bot):
-    await bot.add_cog(Donor(bot))
-
+        # fallback: зөвхөн текст
+        if file:
+            return await interaction.followup.send(text, file=file)
+        return await interaction.followup.send(text)
 
 @bot.tree.command(name="donator_list", description="Donator хэрэглэгчдийн жагсаалт")
 async def donator_list(interaction: discord.Interaction):
