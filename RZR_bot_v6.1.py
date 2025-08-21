@@ -696,7 +696,7 @@ async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
     buf.seek(0)
     return buf
 
-THANK_LINES = ["Дэмжлэгт тань маш их баярлалаа!",]
+THANK_LINES = ["Дэмжлэгт тань баярлалаа!",]
 
 
 _FONT_LOGGED = set()
