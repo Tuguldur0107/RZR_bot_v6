@@ -6,3 +6,4 @@ flask
 python-dotenv
 psycopg2-binary
 asyncpg
+pillow==10.4.0
