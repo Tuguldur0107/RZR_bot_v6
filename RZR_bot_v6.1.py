@@ -18,6 +18,9 @@ from typing import List, Dict
 import math
 from typing import Dict, List
 
+from io import BytesIO
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
+
 # 🗄️ Local modules
 from database import (
     connect, pool, init_pool, ensure_pool,
@@ -40,6 +43,7 @@ from database import (
     # 🛡 Shields
     get_shields, upsert_shield
 )
+
 
 # 🌐 ENV
 load_dotenv()
@@ -614,59 +618,67 @@ async def _fmt_member_line(guild, uid: int, w: int | None, is_leader: bool) -> s
     wtxt = f" ({w})" if w is not None else ""
     return f"- <@{uid}>{wtxt}{leader}"
 
-from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+def format_mnt(amount: int) -> str:
+    return f"{amount:,}₮".replace(",", " ")
+
+def load_font(size: int) -> ImageFont.FreeTypeFont:
+    """Фонт ачаалах – системээс олдохгүй бол default."""
+    for path in [
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ]:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
 
 async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
-    W, H = 1200, 500
+    W, H = 1000, 400
+    bg = Image.new("RGB", (W, H), (15, 23, 42))  # dark slate
 
-    # --- simple gradient background (no linear_gradient dependency)
-    bg = Image.new("RGB", (W, H), "#0f172a")
-    overlay = Image.new("RGB", (W, H), "#1e293b")
-    mask = Image.new("L", (W, H), 0)
-    # зүүн→баруун бүдэг градиент
-    for x in range(W):
-        mask.putpixel((x, 0), int(255 * x / W))
-    mask = mask.resize((W, H))
-    bg = Image.composite(overlay, bg, mask).filter(ImageFilter.GaussianBlur(1))
+    # Gradient overlay
+    grad = Image.new("L", (1, H))
+    for y in range(H):
+        grad.putpixel((0, y), int(255 * (y / H)))
+    grad = grad.resize((W, H))
+    overlay = Image.new("RGB", (W, H), (30, 41, 59))
+    bg = Image.composite(overlay, bg, grad).filter(ImageFilter.GaussianBlur(1))
 
     draw = ImageDraw.Draw(bg)
 
-    # avatar (алдаа гарвал алгасна)
+    # Avatar
+    AV_SIZE = 180
+    avatar = member.display_avatar.replace(size=AV_SIZE) if member.display_avatar else None
     try:
-        avatar_bytes = await member.display_avatar.read()
-        ava = Image.open(BytesIO(avatar_bytes)).convert("RGB").resize((220, 220))
-        mask = Image.new("L", (220, 220), 0)
-        ImageDraw.Draw(mask).ellipse((0, 0, 220, 220), fill=255)
-        bg.paste(ava, (80, H//2 - 110), mask)
-    except Exception as e:
-        print("⚠️ donor_card avatar skip:", e)
-
-    # fonts — truetype байхгүй үед default
-    try:
-        f_big   = ImageFont.truetype("arial.ttf", 64)
-        f_mid   = ImageFont.truetype("arial.ttf", 42)
-        f_small = ImageFont.truetype("arial.ttf", 28)
+        data = await avatar.read()
+        av = Image.open(BytesIO(data)).convert("RGBA").resize((AV_SIZE, AV_SIZE), Image.LANCZOS)
     except Exception:
-        f_big = f_mid = f_small = ImageFont.load_default()
+        av = Image.new("RGBA", (AV_SIZE, AV_SIZE), (200, 200, 200, 255))
+    mask_av = Image.new("L", (AV_SIZE, AV_SIZE), 0)
+    ImageDraw.Draw(mask_av).ellipse([0, 0, AV_SIZE, AV_SIZE], fill=255)
+    bg.paste(av, (60, (H - AV_SIZE) // 2), mask_av)
 
-    # accent зураас
-    draw.rounded_rectangle((40, 40, 28, H-40), radius=10, fill="#22c55e")
+    # Text
+    name_font = load_font(48)
+    money_font = load_font(64)
 
-    # texts
-    name = member.display_name
-    amount = f"{amount_mnt:,}₮"
-    draw.text((340, 130), "🎉 NEW DONATOR", font=f_small, fill="#a3e635")
-    draw.text((340, 190), name, font=f_big, fill="white")
-    draw.text((340, 265), f"+{amount} дэмжлэг", font=f_mid, fill="#93c5fd")
-    draw.text((340, 330), "Танд баярлалаа! ❤️", font=f_small, fill="#eab308")
+    display_name = member.global_name or member.display_name or member.name
+    draw.text((280, 120), display_name, font=name_font, fill=(255, 255, 255))
 
+    amount_text = format_mnt(amount_mnt)
+    bbox = draw.textbbox((0, 0), amount_text, font=money_font)
+    pw, ph = bbox[2] - bbox[0] + 40, bbox[3] - bbox[1] + 20
+    px, py = 280, 200
+    # pill bg
+    draw.rounded_rectangle((px, py, px + pw, py + ph), radius=25, fill=(34, 197, 94))
+    draw.text((px + 20, py + 10), amount_text, font=money_font, fill=(255, 255, 255))
+
+    # Save buffer
     buf = BytesIO()
     bg.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
-
-
 
 def _split_fields(lines: List[str], per_field: int = 10) -> List[str]:
     return ["\n".join(lines[i:i+per_field]) for i in range(0, len(lines), per_field)]
@@ -1955,42 +1967,46 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
 
     await interaction.followup.send("✅ Оноо шинэчлэгдлээ:\n" + "\n".join(lines))
 
-@bot.tree.command(name="add_donator", description="Админ: тоглогчийг donator болгоно")
-@app_commands.describe(member="Donator болгох хэрэглэгч", mnt="Хандивласан мөнгө (₮)")
-async def add_donator(interaction: discord.Interaction, member: discord.Member, mnt: int):
-    if not interaction.user.guild_permissions.administrator:
-        return await interaction.response.send_message("❌ Энэ командыг зөвхөн админ хэрэглэгч ажиллуулж чадна.", ephemeral=True)
+class Donor(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
 
-    try:
-        await interaction.response.defer(thinking=True)
-    except discord.errors.InteractionResponded:
-        pass
+    @app_commands.command(name="add_donator", description="Хандив өгсөн Donator-ыг тэмдэглэх")
+    @app_commands.describe(member="Хэрэглэгч", amount_mnt="Хандивын дүн (MNT)")
+    async def add_donator(self, interaction: discord.Interaction, member: discord.Member, amount_mnt: int):
+        # Check bot perms
+        me = interaction.guild.me
+        perms = interaction.channel.permissions_for(me)
+        need = ["send_messages", "embed_links", "attach_files"]
+        missing = [p for p in need if not getattr(perms, p)]
+        if missing:
+            await interaction.response.send_message(
+                "⛔ Надад дараах эрх дутуу байна: " + ", ".join(missing),
+                ephemeral=True
+            )
+            return
 
-    # 1) DB update + nickname refresh чинь хэвээр:
-    await upsert_donator(member.id, mnt)
-    await update_nicknames_for_users(interaction.guild, [member.id])
+        await interaction.response.defer()
 
-    # 2) Donor card зураад илгээнэ
-    try:
-        img = await render_donor_card(member, mnt)
-        file = discord.File(img, filename="donor_card.png")
+        try:
+            card = await render_donor_card(member, amount_mnt)
+            file = discord.File(card, filename="donator.png")
+            embed = discord.Embed(
+                title="🎉 Donator Added",
+                description=f"{member.mention} хандив өглөө! (+{format_mnt(amount_mnt)})",
+                color=0x22c55e
+            )
+            embed.set_image(url="attachment://donator.png")
+            await interaction.followup.send(embed=embed, file=file)
+        except Exception as e:
+            # fallback
+            await interaction.followup.send(
+                f"🎉 {member.mention} хандив өглөө! (+{format_mnt(amount_mnt)})\n"
+                f"(зураг үүсгэхэд алдаа гарлаа)"
+            )
 
-        emb = discord.Embed(
-            title="💖 Donator Update",
-            description=f"{member.mention} хэрэглэгч {mnt:,}₮ дэмжлэг илгээлээ!",
-            color=0xFFD700
-        )
-        emb.set_image(url="attachment://donor_card.png")
-
-        await interaction.followup.send(embed=emb, files=[file])
-    except Exception as e:
-        import traceback
-        print("⚠️ donor card render алдаа:", e)
-        traceback.print_exc()
-        await interaction.followup.send(
-            f"🎉 {member.mention} хэрэглэгчийг Donator болголоо! (+{mnt:,}₮) (зураг үүсгэхэд алдаа гарлаа)"
-        )
-
+async def setup(bot: commands.Bot):
+    await bot.add_cog(Donor(bot))
 
 
 @bot.tree.command(name="donator_list", description="Donator хэрэглэгчдийн жагсаалт")
