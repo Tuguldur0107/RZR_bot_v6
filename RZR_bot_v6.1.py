@@ -16,6 +16,7 @@ import traceback
 from asyncio import sleep
 from typing import List, Dict
 import math
+from typing import Dict, List
 
 # 🗄️ Local modules
 from database import (
@@ -407,7 +408,43 @@ async def get_performance_emoji(uid: int) -> str:
     if perf < 0:
         n = (-perf) if PERF_EMOJI_CAP is None else min(-perf, PERF_EMOJI_CAP)
         return "❌" * n
-    return "➖"  # ялалт/ялагдал тэнцүү
+    return ""  # ялалт/ялагдал тэнцүү
+
+
+
+async def daily_nickname_refresh():
+    await bot.wait_until_ready()
+    guild = bot.get_guild(GUILD_ID)
+    if not guild:
+        print("⚠️ guild олдсонгүй"); return
+
+    while not bot.is_closed():
+        # — Дараагийн 14:00 (UTC+8)-ийг тооцоолно
+        now_utc = datetime.now(timezone.utc)
+        now_mn  = now_utc.astimezone(MN_TZ)
+
+        target_mn = now_mn.replace(hour=14, minute=0, second=0, microsecond=0)
+        if target_mn <= now_mn:
+            target_mn += timedelta(days=1)   # өнөөдрийн 14:00 өнгөрсөн бол маргааш
+
+        # — Хэд унтахыг секундээр
+        sleep_secs = (target_mn - now_mn).total_seconds()
+        print(f"🕒 Nick refresh will run at {target_mn.isoformat()} (MN) — sleeping {int(sleep_secs)}s")
+        await asyncio.sleep(sleep_secs)
+
+        # — Ажиллуулах (rate-limit ээлтэйгээр хэсэглэж явуулъя)
+        try:
+            member_ids = [m.id for m in guild.members if not m.bot]
+            BATCH = 50
+            for i in range(0, len(member_ids), BATCH):
+                chunk = member_ids[i:i+BATCH]
+                await update_nicknames_for_users(guild, chunk)
+                await asyncio.sleep(2)  # Discord rate limit-ээс сэргийлж амьсгаа авъя
+            print("✅ Nicknames refreshed at 14:00 MN time")
+        except Exception as e:
+            print("❌ nickname refresh error:", e)
+        # дараагийн давталт дахин “дараагийн 14:00”-ийг шинээр тооцно
+
 
 async def ensure_scores_for_users(guild, uids: list[int]) -> list[int]:
     """scores хүснэгтэд байхгүй бол default tier/score-оор үүсгэнэ."""
@@ -491,7 +528,7 @@ async def _fmt_player_line(guild, weights_map, p: dict) -> str:
     wtxt = f" · w:{w}" if w is not None else ""
 
     # 🧾 Эцсийн мөр – mention + base нэр, дараа нь оноо/тэр/перф
-    return f"- <@{uid}> — `{old_s} → {new_s}` · `[{old_t} → {new_t}]` {t_arrow} {perf}{wtxt}"
+    return f"- <@{uid}> — `{old_s} → {new_s}` · `[{old_t} → {new_t}]` {t_arrow}{wtxt}"
 
 
 async def send_match_result_embed(
@@ -559,9 +596,6 @@ async def send_match_result_embed(
     # Илгээх
     await interaction.followup.send(embed=emb)
 
-# ── Team assignment Embed helper ─────────────────────────────────────────────
-from typing import Dict, List
-
 def _team_badge(i: int) -> str:
     badges = ["🥇","🥈","🥉","🎯","🔥","🚀","🎮","🛡️","⚔️","🧠","🏅"]
     return badges[i % len(badges)]
@@ -576,7 +610,8 @@ async def _fmt_member_line(guild, uid: int, w: int | None, is_leader: bool) -> s
     perf = await get_performance_emoji(uid)
     leader = " 😎 Team Leader" if is_leader else ""
     wtxt = f" ({w})" if w is not None else ""
-    return f"- <@{uid}>{wtxt} {perf}{leader}"
+    return f"- <@{uid}>{wtxt}{leader}"
+
 
 
 def _split_fields(lines: List[str], per_field: int = 10) -> List[str]:
@@ -671,7 +706,8 @@ async def on_ready():
     print("✅ DB pool амжилттай эхэллээ.")
     # ⚙️ Slash командуудыг global sync хийнэ
     await bot.tree.sync()
-
+    
+    asyncio.create_task(daily_nickname_refresh())
     # 🧠 Async task-аар session болон DB pool initialize хийнэ
     asyncio.create_task(initialize_bot())
 
@@ -815,7 +851,7 @@ async def show_added_players(interaction: discord.Interaction):
 
         # мөрүүдийг 10-аар нь багцалж талбаруудад хийнэ (Discord field limit хамгаална)
         lines = [
-            f"- {name} — `{tier} | {score:+}` · w:`{weight}` {perf}"
+            f"- {name} — `{tier} | {score:+}` · w:`{weight}`"
             for (_uid, name, tier, score, weight, perf) in rows
         ]
         parts = ["\n".join(lines[i:i+10]) for i in range(0, len(lines), 10)]
