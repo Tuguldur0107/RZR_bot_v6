@@ -4,6 +4,7 @@ import json
 import asyncio
 import traceback
 from datetime import datetime, timezone, timedelta
+import unicodedata
 
 # 🌿 Third-party modules
 import discord
@@ -621,46 +622,6 @@ async def _fmt_member_line(guild, uid: int, w: int | None, is_leader: bool) -> s
 def format_mnt(amount: int) -> str:
     return f"{amount:,}₮".replace(",", " ")
 
-# --- REPLACE this function ---
-def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    root = Path(__file__).resolve().parent
-    candidates = [
-        root / "assets" / "fonts" / ("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"),
-        Path(PIL_FILE).parent / "fonts" / ("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"),
-        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-        Path("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
-    ]
-    for p in candidates:
-        try:
-            return ImageFont.truetype(str(p), size)
-        except Exception:
-            continue
-    return ImageFont.load_default()
-
-
-def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
-    """
-    DejaVuSans (Pillow багцын дотор байдаг) → safest.
-    Олдохгүй бол системийн замууд руу, эцэст нь load_default() руу унадаг.
-    """
-    candidates = []
-    # 1) Pillow-ийн өөрийн fonts хавтас
-    pil_fonts = os.path.join(os.path.dirname(PIL_FILE), "fonts")
-    candidates.append(os.path.join(pil_fonts, "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"))
-    # 2) Системийн нийтлэг байрлал
-    candidates += [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        "./assets/fonts/DejaVuSans-Bold.ttf" if bold else "./assets/fonts/DejaVuSans.ttf",
-    ]
-    for p in candidates:
-        try:
-            return ImageFont.truetype(p, size)
-        except Exception:
-            continue
-    # fallback – ажиллана, гэхдээ гоё биш
-    return ImageFont.load_default()
-
 async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
     # 1) template-ээ бэлэн болгоно
     lay = _ensure_gold_template(DONOR_BG_PATH)
@@ -692,12 +653,14 @@ async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
     tw = draw.textlength(amount_text, font=f_amount)
     tx = x + (w - tw)//2
     ty = y + (h - f_amount.size)//2 - 6
-    # small shadow
+    # small shadow + gold
     draw.text((tx+2, ty+2), amount_text, font=f_amount, fill=(40,15,0))
     draw.text((tx, ty), amount_text, font=f_amount, fill=(255,195,90))
 
-    # 4) Name text
+    # 4) Name text (normalize хийж, фэнси тэмдэгтүүдийг цэвэрлэнэ)
     display_name = member.global_name or member.display_name or member.name
+    display_name = unicodedata.normalize("NFC", display_name)\
+                     .replace("\u200b","").replace("\u200d","").replace("\ufe0f","")
     x, y, w, h = lay["name_box"]
     f_name = _fit_font(draw, display_name, prefer=78, min_size=40, max_w=w-40, bold=True)
     tw = draw.textlength(display_name, font=f_name)
@@ -706,21 +669,48 @@ async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
     draw.text((tx+2, ty+2), display_name, font=f_name, fill=(40,15,0))
     draw.text((tx, ty), display_name, font=f_name, fill=(255,205,120))
 
-    # 5) (optional) доод жижиг мөр — хүсэхгүй бол comment хийж болно
-    # exx = "Thank you for supporting our community!"
-    # x, y, w, h = lay["extra_box"]
-    # f_small = _fit_font(draw, exx, prefer=40, min_size=26, max_w=w-40, bold=False)
-    # tw = draw.textlength(exx, font=f_small)
-    # tx = x + (w - tw)//2
-    # ty = y + (h - f_small.size)//2 - 2
-    # draw.text((tx+2, ty+2), exx, font=f_small, fill=(40,15,0))
-    # draw.text((tx, ty), exx, font=f_small, fill=(255,190,90))
+    # 5) Thank-you tagline (доорх хайрцагт, рандом нэг мөр)
+    sx, sy, sw, sh = lay["extra_box"]
+    sub = random.choice(THANK_LINES)
+    f_sub = _fit_font(draw, sub, prefer=40, min_size=26, max_w=sw-40, bold=False)
+    stw = draw.textlength(sub, font=f_sub)
+    stx = sx + (sw - stw)//2
+    sty = sy + (sh - f_sub.size)//2 - 2
+    draw.text((stx+2, sty+2), sub, font=f_sub, fill=(40,15,0))
+    draw.text((stx, sty), sub, font=f_sub, fill=(255,190,90))
 
     # 6) export
     buf = BytesIO()
     img.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
+
+THANK_LINES = ["Дэмжлэгт тань маш их баярлалаа!",]
+
+
+_FONT_LOGGED = set()
+
+def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    root = Path(__file__).resolve().parent
+    candidates = [
+        root / "assets" / "fonts" / ("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"),
+        Path(PIL_FILE).parent / "fonts" / ("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+    ]
+    for p in candidates:
+        try:
+            f = ImageFont.truetype(str(p), size)
+            key = (str(p), size, bold)
+            if key not in _FONT_LOGGED:
+                print(f"🅵 Font loaded → {p.name} | size={size} | bold={bold}")
+                _FONT_LOGGED.add(key)
+            return f
+        except Exception:
+            continue
+    # fallback – алдаа шидэхгүй
+    print("🅵 Font fallback → ImageFont.load_default()")
+    return ImageFont.load_default()
 
 def _fit_font(draw: ImageDraw.ImageDraw, text: str, prefer: int, min_size: int, max_w: int, bold=True):
     size = prefer
@@ -910,7 +900,6 @@ def _check_send_perms(interaction: discord.Interaction):
         if hasattr(cp, "send_messages_in_threads") and not cp.send_messages_in_threads:
             return False, "⛔ Thread дотор мессеж бичих эрх алга.", False, False
     return True, None, bool(getattr(cp, "embed_links", False)), bool(getattr(cp, "attach_files", False))
-
 
 def _split_fields(lines: List[str], per_field: int = 10) -> List[str]:
     return ["\n".join(lines[i:i+per_field]) for i in range(0, len(lines), per_field)]
