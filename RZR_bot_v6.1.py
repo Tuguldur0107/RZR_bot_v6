@@ -416,8 +416,6 @@ async def get_performance_emoji(uid: int) -> str:
         return "❌" * n
     return ""  # ялалт/ялагдал тэнцүү
 
-
-
 async def daily_nickname_refresh():
     await bot.wait_until_ready()
     guild = bot.get_guild(GUILD_ID)
@@ -450,7 +448,6 @@ async def daily_nickname_refresh():
         except Exception as e:
             print("❌ nickname refresh error:", e)
         # дараагийн давталт дахин “дараагийн 14:00”-ийг шинээр тооцно
-
 
 async def ensure_scores_for_users(guild, uids: list[int]) -> list[int]:
     """scores хүснэгтэд байхгүй бол default tier/score-оор үүсгэнэ."""
@@ -535,7 +532,6 @@ async def _fmt_player_line(guild, weights_map, p: dict) -> str:
 
     # 🧾 Эцсийн мөр – mention + base нэр, дараа нь оноо/тэр/перф
     return f"- <@{uid}> — `{old_s} → {new_s}` · `[{old_t} → {new_t}]` {t_arrow}{wtxt}"
-
 
 async def send_match_result_embed(
     interaction: discord.Interaction,
@@ -768,18 +764,38 @@ async def send_team_assignment_embed(
 async def on_ready():
     print(f"🤖 Bot нэвтэрлээ: {bot.user}")
     print("📁 Working directory:", os.getcwd())
-    await init_pool() 
+
+    await init_pool()
     print("✅ DB pool амжилттай эхэллээ.")
-    # ⚙️ Slash командуудыг global sync хийнэ
-    await bot.tree.sync()
+
+    # ✅ Donor cog-оо ачаалнах (эвэрхий нь Unknown Integration-г арилгана)
+    try:
+        # давхар нэмэгдэхээс сэргийлж өмнө нь байвал алгасъя
+        if not bot.get_cog("Donor"):
+            await bot.add_cog(Donor(bot))
+            print("✅ Donor cog loaded")
+        else:
+            print("↔️ Donor cog already loaded")
+    except Exception as e:
+        print("❌ Donor cog load fail:", e)
+
+    # ⚙️ Slash командыг шууд guild рүү түр sync хийвэл шууд харагдана
+    try:
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.clear_commands(guild=guild)            # хуучны үлдэгдэл цэвэрлэнэ
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            print(f"🔁 Guild sync: {len(synced)} cmds")
+        # global sync нэмэлтээр (сонголт)
+        await bot.tree.sync()
+        print("🔁 Global sync done")
+    except Exception as e:
+        print("❌ Command sync failed:", e)
 
     asyncio.create_task(daily_nickname_refresh())
-    # 🧠 Async task-аар session болон DB pool initialize хийнэ
     asyncio.create_task(initialize_bot())
-
-    # 🕓 Timeout шалгагчийг эхлүүлнэ
     asyncio.create_task(session_timeout_checker())
-
 async def initialize_bot():
     try:
         await init_pool()
@@ -2303,10 +2319,12 @@ async def resync(interaction: discord.Interaction):
         return
 
     if not interaction.user.guild_permissions.administrator:
-        await interaction.followup.send("⛔️ Зөвхөн админ ашиглана.", ephemeral=True)
-        return
+        return await interaction.followup.send("⛔️ Зөвхөн админ ашиглана.", ephemeral=True)
 
     try:
+        # ✅ хуучны үлдэгдлийг цэвэрлэж sync
+        bot.tree.clear_commands(guild=interaction.guild)
+        bot.tree.copy_global_to(guild=interaction.guild)
         synced = await bot.tree.sync(guild=interaction.guild)
         await interaction.followup.send(f"✅ {len(synced)} команд амжилттай дахин бүртгэгдлээ.", ephemeral=True)
     except Exception as e:
