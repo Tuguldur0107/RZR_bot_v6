@@ -20,7 +20,7 @@ from typing import Dict, List
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageFont, ImageChops
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
+
 
 # 🗄️ Local modules
 from database import (
@@ -625,6 +625,29 @@ def _font(size: int, bold=False) -> ImageFont.FreeTypeFont:
     base = os.path.join(os.path.dirname(PIL.__file__), "fonts")
     fname = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
     return ImageFont.truetype(os.path.join(base, fname), size)
+
+def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
+    """
+    DejaVuSans (Pillow багцын дотор байдаг) → safest.
+    Олдохгүй бол системийн замууд руу, эцэст нь load_default() руу унадаг.
+    """
+    candidates = []
+    # 1) Pillow-ийн өөрийн fonts хавтас
+    pil_fonts = os.path.join(os.path.dirname(PIL_FILE), "fonts")
+    candidates.append(os.path.join(pil_fonts, "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"))
+    # 2) Системийн нийтлэг байрлал
+    candidates += [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "./assets/fonts/DejaVuSans-Bold.ttf" if bold else "./assets/fonts/DejaVuSans.ttf",
+    ]
+    for p in candidates:
+        try:
+            return ImageFont.truetype(p, size)
+        except Exception:
+            continue
+    # fallback – ажиллана, гэхдээ гоё биш
+    return ImageFont.load_default()
 
 async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
     # 1) template-ээ бэлэн болгоно
