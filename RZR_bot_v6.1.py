@@ -631,31 +631,34 @@ def load_font(size: int) -> ImageFont.FreeTypeFont:
 
 async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
     W, H = 1000, 400
-    bg = Image.new("RGB", (W, H), (15, 23, 42))  # dark slate
 
-    # Gradient overlay
+    # --- background (dark + зөөлөн градиент) ---
+    bg = Image.new("RGB", (W, H), (15, 23, 42))  # slate-900
     grad = Image.new("L", (1, H))
     for y in range(H):
-        grad.putpixel((0, y), int(255 * (y / H)))
+        grad.putpixel((0, y), int(255 * (y / (H - 1))))
     grad = grad.resize((W, H))
-    overlay = Image.new("RGB", (W, H), (30, 41, 59))
+    overlay = Image.new("RGB", (W, H), (30, 41, 59))  # slate-800
     bg = Image.composite(overlay, bg, grad).filter(ImageFilter.GaussianBlur(1))
 
     draw = ImageDraw.Draw(bg)
 
-    # Avatar
-    AV_SIZE = 180
-    avatar = member.display_avatar.replace(size=AV_SIZE) if member.display_avatar else None
+    # --- avatar ---
+    AV_DRAW = 180               # карт дээрх бодит хэмжээ
+    REQ_SIZE = 256              # Discord asset size: 2^n (16..4096) -> 256 OK
     try:
-        data = await avatar.read()
-        av = Image.open(BytesIO(data)).convert("RGBA").resize((AV_SIZE, AV_SIZE), Image.LANCZOS)
+        avatar_asset = member.display_avatar.replace(size=REQ_SIZE)
+        data = await avatar_asset.read()
+        av = Image.open(BytesIO(data)).convert("RGBA")
     except Exception:
-        av = Image.new("RGBA", (AV_SIZE, AV_SIZE), (200, 200, 200, 255))
-    mask_av = Image.new("L", (AV_SIZE, AV_SIZE), 0)
-    ImageDraw.Draw(mask_av).ellipse([0, 0, AV_SIZE, AV_SIZE], fill=255)
-    bg.paste(av, (60, (H - AV_SIZE) // 2), mask_av)
+        av = Image.new("RGBA", (REQ_SIZE, REQ_SIZE), (200, 200, 200, 255))
 
-    # Text
+    av = ImageOps.fit(av, (AV_DRAW, AV_DRAW), method=Image.LANCZOS)
+    mask_av = Image.new("L", (AV_DRAW, AV_DRAW), 0)
+    ImageDraw.Draw(mask_av).ellipse([0, 0, AV_DRAW, AV_DRAW], fill=255)
+    bg.paste(av, (60, (H - AV_DRAW) // 2), mask_av)
+
+    # --- texts ---
     name_font = load_font(48)
     money_font = load_font(64)
 
@@ -664,17 +667,20 @@ async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
 
     amount_text = format_mnt(amount_mnt)
     bbox = draw.textbbox((0, 0), amount_text, font=money_font)
-    pw, ph = bbox[2] - bbox[0] + 40, bbox[3] - bbox[1] + 20
+    pill_w = (bbox[2] - bbox[0]) + 40
+    pill_h = (bbox[3] - bbox[1]) + 20
     px, py = 280, 200
-    # pill bg
-    draw.rounded_rectangle((px, py, px + pw, py + ph), radius=25, fill=(34, 197, 94))
+
+    # pill bg (rounded rectangle)
+    draw.rounded_rectangle((px, py, px + pill_w, py + pill_h), radius=25, fill=(34, 197, 94))
     draw.text((px + 20, py + 10), amount_text, font=money_font, fill=(255, 255, 255))
 
-    # Save buffer
+    # --- save ---
     buf = BytesIO()
     bg.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
+
 
 def _check_send_perms(interaction: discord.Interaction):
     """return: ok, err_text, can_embed, can_attach"""
