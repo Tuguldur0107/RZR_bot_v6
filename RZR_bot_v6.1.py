@@ -491,7 +491,7 @@ async def _fmt_player_line(guild, weights_map, p: dict) -> str:
     wtxt = f" · w:{w}" if w is not None else ""
 
     # 🧾 Эцсийн мөр – mention + base нэр, дараа нь оноо/тэр/перф
-    return f"- <@{uid}> **{base}** — `{old_s} → {new_s}` · `[{old_t} → {new_t}]` {t_arrow} {perf}{wtxt}"
+    return f"- <@{uid}> — `{old_s} → {new_s}` · `[{old_t} → {new_t}]` {t_arrow} {perf}{wtxt}"
 
 
 async def send_match_result_embed(
@@ -576,11 +576,16 @@ async def _fmt_member_line(guild, uid: int, w: int | None, is_leader: bool) -> s
     perf = await get_performance_emoji(uid)
     leader = " 😎 Team Leader" if is_leader else ""
     wtxt = f" ({w})" if w is not None else ""
-    return f"- <@{uid}> **{base}**{wtxt} {perf}{leader}"
+    return f"- <@{uid}>{wtxt} {perf}{leader}"
 
 
 def _split_fields(lines: List[str], per_field: int = 10) -> List[str]:
     return ["\n".join(lines[i:i+per_field]) for i in range(0, len(lines), per_field)]
+
+def _chunks(seq, size):
+    """seq-ийг size-ээр хэсэглэн өгнө (embed field 1024 лимит хамгаалалт)."""
+    for i in range(0, len(seq or []), size):
+        yield seq[i:i+size]
 
 async def send_team_assignment_embed(
     interaction: discord.Interaction,
@@ -1223,7 +1228,6 @@ async def go_gpt(interaction: discord.Interaction, team_count: int, players_per_
         )
     except Exception:
         traceback.print_exc()
-
 
 @bot.tree.command(name="set_match_result", description="Match бүртгэнэ, +1/-1 оноо, tier өөрчилнө")
 @app_commands.describe(
