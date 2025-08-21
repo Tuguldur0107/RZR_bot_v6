@@ -619,61 +619,53 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
     W, H = 1200, 500
-    # --- Gradient background
-    base = Image.new("RGB", (W, H), "#0f172a")
-    top  = Image.new("RGB", (W, H), "#1e293b")
-    mask = Image.linear_gradient("L").resize((W, H))
-    bg   = Image.composite(top, base, mask).filter(ImageFilter.GaussianBlur(2))
+
+    # --- simple gradient background (no linear_gradient dependency)
+    bg = Image.new("RGB", (W, H), "#0f172a")
+    overlay = Image.new("RGB", (W, H), "#1e293b")
+    mask = Image.new("L", (W, H), 0)
+    # зүүн→баруун бүдэг градиент
+    for x in range(W):
+        mask.putpixel((x, 0), int(255 * x / W))
+    mask = mask.resize((W, H))
+    bg = Image.composite(overlay, bg, mask).filter(ImageFilter.GaussianBlur(1))
 
     draw = ImageDraw.Draw(bg)
 
-    # --- Avatar (цэгцтэй дугуйлж авна)
+    # avatar (алдаа гарвал алгасна)
     try:
-      avatar_bytes = await member.display_avatar.read()  # discord.py v2
+        avatar_bytes = await member.display_avatar.read()
+        ava = Image.open(BytesIO(avatar_bytes)).convert("RGB").resize((220, 220))
+        mask = Image.new("L", (220, 220), 0)
+        ImageDraw.Draw(mask).ellipse((0, 0, 220, 220), fill=255)
+        bg.paste(ava, (80, H//2 - 110), mask)
+    except Exception as e:
+        print("⚠️ donor_card avatar skip:", e)
+
+    # fonts — truetype байхгүй үед default
+    try:
+        f_big   = ImageFont.truetype("arial.ttf", 64)
+        f_mid   = ImageFont.truetype("arial.ttf", 42)
+        f_small = ImageFont.truetype("arial.ttf", 28)
     except Exception:
-      avatar_bytes = None
-    if avatar_bytes:
-      ava = Image.open(BytesIO(avatar_bytes)).convert("RGB").resize((220,220))
-      mask = Image.new("L", (220,220), 0)
-      ImageDraw.Draw(mask).ellipse((0,0,220,220), fill=255)
-      bg.paste(ava, (80, H//2 - 110), mask)
+        f_big = f_mid = f_small = ImageFont.load_default()
 
-    # --- Texts
-    def load_font(size):
-        # өөрийн сервер дээрх font замаа тавибал илүү гоё. fallback:
-        try:
-            return ImageFont.truetype("fonts/Inter-Bold.ttf", size)
-        except:
-            return ImageFont.load_default()
+    # accent зураас
+    draw.rounded_rectangle((40, 40, 28, H-40), radius=10, fill="#22c55e")
 
-    f_big   = load_font(64)
-    f_mid   = load_font(42)
-    f_small = load_font(28)
-
-    name   = member.display_name
+    # texts
+    name = member.display_name
     amount = f"{amount_mnt:,}₮"
-    title  = "🎉 NEW DONATOR!"
-    line1  = f"{name}"
-    line2  = f"+{amount} дэмжлэг"
-
-    # зүүн талын чимэглэл
-    draw.rounded_rectangle((40, 40, 20, H-40), radius=10, fill="#22c55e")
-
-    # text block
-    x0 = 340
-    draw.text((x0, 140), title,  font=f_small, fill="#a3e635")
-    draw.text((x0, 200), line1,  font=f_big,   fill="white")
-    draw.text((x0, 280), line2,  font=f_mid,   fill="#93c5fd")
-    draw.text((x0, 350), "Танд баярлалаа! ❤️", font=f_small, fill="#eab308")
-
-    # footer (server нэр, огноо гэх мэт хүсвэл)
-    # draw.text((x0, 410), f"{member.guild.name}", font=f_small, fill="#cbd5e1")
+    draw.text((340, 130), "🎉 NEW DONATOR", font=f_small, fill="#a3e635")
+    draw.text((340, 190), name, font=f_big, fill="white")
+    draw.text((340, 265), f"+{amount} дэмжлэг", font=f_mid, fill="#93c5fd")
+    draw.text((340, 330), "Танд баярлалаа! ❤️", font=f_small, fill="#eab308")
 
     buf = BytesIO()
-    buf.seek(0)
     bg.save(buf, format="PNG", optimize=True)
     buf.seek(0)
     return buf
+
 
 
 def _split_fields(lines: List[str], per_field: int = 10) -> List[str]:
@@ -1982,18 +1974,23 @@ async def add_donator(interaction: discord.Interaction, member: discord.Member, 
     try:
         img = await render_donor_card(member, mnt)
         file = discord.File(img, filename="donor_card.png")
+
         emb = discord.Embed(
             title="💖 Donator Update",
             description=f"{member.mention} хэрэглэгч {mnt:,}₮ дэмжлэг илгээлээ!",
             color=0xFFD700
         )
         emb.set_image(url="attachment://donor_card.png")
-        await interaction.followup.send(file=file, embed=emb)
+
+        await interaction.followup.send(embed=emb, files=[file])
     except Exception as e:
+        import traceback
         print("⚠️ donor card render алдаа:", e)
+        traceback.print_exc()
         await interaction.followup.send(
-            f"🎉 {member.mention} хэрэглэгчийг Donator болголоо! (+{mnt:,}₮)",
+            f"🎉 {member.mention} хэрэглэгчийг Donator болголоо! (+{mnt:,}₮) (зураг үүсгэхэд алдаа гарлаа)"
         )
+
 
 
 @bot.tree.command(name="donator_list", description="Donator хэрэглэгчдийн жагсаалт")
