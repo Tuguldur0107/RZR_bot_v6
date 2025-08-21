@@ -91,21 +91,20 @@ async def call_gpt_balance_api(team_count, players_per_team, players):
     client = AsyncOpenAI()  # async client
 
     # 📝 Тогтмол дүрэм (system message)
-    PROMPT_RULES = """
+    PROMPT_RULES = f"""
     You are a precise team balancing engine.
     Rules:
-    - Always return strict JSON only: {"teams": [[id1,id2,...],[...],...]}.
-    - Each team must have exactly {players_per_team} players, no duplicates.
-    - Use only IDs provided.
-    - Goal: minimize the difference in team total "power".
-    - Do not add any explanation or markdown.
+    - Always return strict JSON only in this format: {{"teams": [[id1,id2,...],[...],...]}}
+    - Use only the IDs given.
+    - Exactly {team_count} teams, each with {players_per_team} players.
+    - No explanations, no markdown, no text.
     """
 
     try:
         resp = await client.chat.completions.create(
             model="gpt-5-mini",   # эсвэл gpt-5 / gpt-5-nano гэж солиод хэрэглэж болно
             messages=[
-                {"role": "system", "content": PROMPT_RULES.format(players_per_team=players_per_team)},
+                {"role": "system", "content": PROMPT_RULES},
                 {"role": "user", "content": json.dumps({
                     "team_count": team_count,
                     "players_per_team": players_per_team,
@@ -117,8 +116,12 @@ async def call_gpt_balance_api(team_count, players_per_team, players):
         )
 
         content = resp.choices[0].message.content.strip()
+        if content.startswith("```"):
+            lines = [ln for ln in content.splitlines() if not ln.strip().startswith("```")]
+            content = "\n".join(lines).strip()
+
         parsed = json.loads(content)
-        teams = parsed.get("teams", None)
+        teams = parsed["teams"] if isinstance(parsed, dict) and "teams" in parsed else parsed
         if not isinstance(teams, list):
             raise ValueError("`teams` not found or not a list in GPT response.")
         return teams
@@ -706,7 +709,7 @@ async def on_ready():
     print("✅ DB pool амжилттай эхэллээ.")
     # ⚙️ Slash командуудыг global sync хийнэ
     await bot.tree.sync()
-    
+
     asyncio.create_task(daily_nickname_refresh())
     # 🧠 Async task-аар session болон DB pool initialize хийнэ
     asyncio.create_task(initialize_bot())
@@ -1196,8 +1199,9 @@ async def go_gpt(interaction: discord.Interaction, team_count: int, players_per_
             row = []
             for u in t:
                 try:
-                    u = int(u)
-                except:
+                    u = int(str(u).strip())
+                except Exception as e:
+                    print("⚠️ sanitize: invalid id", u, e)
                     continue
                 if u in allowed_ids and u not in seen and len(row) < players_per_team:
                     row.append(u); seen.add(u)
