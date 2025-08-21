@@ -111,7 +111,6 @@ async def call_gpt_balance_api(team_count, players_per_team, players):
                     "players": players
                 }, ensure_ascii=False)}
             ],
-            temperature=0.0,
             response_format={"type": "json_object"},
         )
 
