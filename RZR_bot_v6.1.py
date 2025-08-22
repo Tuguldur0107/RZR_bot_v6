@@ -1110,9 +1110,6 @@ START_MATCH_BANNER = Path("assets/Start_match.png")
 
 @bot.tree.command(name="start_match", description="Session эхлүүлнэ (шинэ тоглолтын session)")
 async def start_match(interaction: discord.Interaction):
-    # Хэрэв зөвхөн админд зөвшөөрөх бол дараах 3 мөрийг uncomment хийнэ.
-    # if not interaction.user.guild_permissions.administrator:
-    #     return await interaction.response.send_message("⛔️ Зөвхөн админ.", ephemeral=True)
 
     # 1) Interaction-ийг эхлээд acknowledge (дараа нь followup-уудаар явуулна)
     try:
@@ -1153,9 +1150,6 @@ async def start_match(interaction: discord.Interaction):
     # 4) Баннертай анхны мэдэгдэл (нийтэд харагдана)
     text = "🏁 **Match эхэллээ!** ADDME гэж бичээд бүртгүүлээрэй."
     await _send_with_banner(interaction, text, banner_path=START_MATCH_BANNER, ephemeral=False)
-
-    # 5) Нэмэлт тайлбар (optional)
-    await interaction.followup.send("🟢 Session эхэллээ. `addme` коммандаар тоглогчид бүртгүүлнэ үү.", ephemeral=False)
 
 @bot.tree.command(name="addme", description="Тоглогч өөрийгөө бүртгүүлнэ")
 async def addme(interaction: discord.Interaction):
