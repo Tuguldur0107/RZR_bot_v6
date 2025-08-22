@@ -994,6 +994,26 @@ async def send_team_assignment_embed(
 
     await interaction.followup.send(embed=emb)
 
+START_MATCH_BANNER = Path("assets/Start_match.png")
+
+async def _send_with_banner(interaction: discord.Interaction, content: str, *, banner_path: Path = START_MATCH_BANNER, ephemeral: bool = False):
+    ok, err, can_embed, can_attach = _check_send_perms(interaction)
+    file = None
+    if banner_path.exists() and can_attach:
+        file = discord.File(str(banner_path), filename=banner_path.name)
+
+    sender = interaction.response.send_message if not interaction.response.is_done() else interaction.followup.send
+
+    if file:
+        await sender(content=content, file=file, ephemeral=ephemeral)
+    else:
+        msg = content
+        if not banner_path.exists():
+            msg += f"\n_(Зураг олдсонгүй: {banner_path.as_posix()})_"
+        elif not can_attach:
+            msg += "\n_(attach_files эрх алга — зураг хавсаргаж чадсангүй)_"
+        await sender(content=msg, ephemeral=ephemeral)
+
 
 # 🧬 Start
 @bot.event
@@ -1050,40 +1070,56 @@ async def initialize_bot():
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message("🏓 Pong!")
 
+START_MATCH_BANNER = Path("assets/Start_match.png")
+
 @bot.tree.command(name="start_match", description="Session эхлүүлнэ (шинэ тоглолтын session)")
 async def start_match(interaction: discord.Interaction):
+    # Хэрэв зөвхөн админд зөвшөөрөх бол дараах 3 мөрийг uncomment хийнэ.
+    # if not interaction.user.guild_permissions.administrator:
+    #     return await interaction.response.send_message("⛔️ Зөвхөн админ.", ephemeral=True)
+
+    # 1) Interaction-ийг эхлээд acknowledge (дараа нь followup-уудаар явуулна)
     try:
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(ephemeral=False, thinking=False)
     except discord.errors.InteractionResponded:
-        return
+        pass
+
+    # 2) Өмнөх match/session-уудыг цэвэрлэх
+    try:
+        await clear_last_match()
+    except Exception as e:
+        print("⚠️ clear_last_match алдаа:", e)
+
     try:
         await clear_session_state()
         print("🧼 өмнөх session_state устлаа.")
     except Exception as e:
         print("❌ clear_session_state алдаа:", e)
 
+    # 3) Шинэ session үүсгэх (UTC ISO string-ээр хадгална)
+    now = datetime.now(timezone.utc)
+    session = {
+        "active": True,
+        "start_time": now.isoformat(),
+        "last_win_time": now.isoformat(),
+        "initiator_id": interaction.user.id,
+        "player_ids": [],
+        "teams": [],
+        "changed_players": [],
+        "strategy": ""
+    }
     try:
-        now = datetime.now(timezone.utc)
-
-        await save_session_state({
-            "active": True,
-            "start_time": now,
-            "last_win_time": now,
-            "initiator_id": interaction.user.id,
-            "player_ids": [],
-            "teams": [],
-            "changed_players": [],
-            "strategy": ""
-        }, allow_empty=True)
-
-        await interaction.followup.send(
-            "🟢 Session эхэллээ. `addme` коммандаар тоглогчид бүртгүүлнэ үү."
-        )
-
+        await save_session_state(session, allow_empty=True)
     except Exception as e:
-        print("❌ start_match бүхэлдээ гацлаа:", e)
-        if not interaction.response.is_done():
-            await interaction.followup.send("⚠️ Session эхлүүлэхэд алдаа гарлаа.", ephemeral=True)
+        print("❌ save_session_state алдаа:", e)
+        return await interaction.followup.send("⚠️ Session эхлүүлэхэд алдаа гарлаа.", ephemeral=True)
+
+    # 4) Баннертай анхны мэдэгдэл (нийтэд харагдана)
+    text = "🏁 **Match эхэллээ!** ADDME гэж бичээд бүртгүүлээрэй."
+    await _send_with_banner(interaction, text, banner_path=START_MATCH_BANNER, ephemeral=False)
+
+    # 5) Нэмэлт тайлбар (optional)
+    await interaction.followup.send("🟢 Session эхэллээ. `addme` коммандаар тоглогчид бүртгүүлнэ үү.", ephemeral=False)
 
 @bot.tree.command(name="addme", description="Тоглогч өөрийгөө бүртгүүлнэ")
 async def addme(interaction: discord.Interaction):
@@ -1184,7 +1220,7 @@ async def show_added_players(interaction: discord.Interaction):
         # 💡 Жижиг зөвлөмж
         team_count = session.get("team_count") or 2
         ppl_per = session.get("players_per_team") or 5
-        emb.set_footer(text=f"Tip: /go_bot {team_count} {ppl_per} эсвэл /go_gpt {team_count} {ppl_per}")
+        emb.set_footer(text=f"Tip: /go_bot эсвэл /go_gpt хийж багт хувиарлаарай")
 
         await interaction.followup.send(embed=emb)
 
@@ -1454,7 +1490,6 @@ async def go_bot(interaction: discord.Interaction, team_count: int, players_per_
         )
     except Exception:
         traceback.print_exc()
-
 
 @bot.tree.command(name="go_gpt", description="GPT-ээр онооны баланс хийж баг хуваарилна")
 @app_commands.describe(
