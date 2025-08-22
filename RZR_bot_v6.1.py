@@ -1016,12 +1016,6 @@ async def _send_with_banner(interaction: discord.Interaction, content: str, *, b
 
 
 KICK_VOTE_THRESHOLD = 10
-pool: asyncpg.Pool | None = None
-
-# ---- DB connect (DDL байхгүй!) ----
-async def db_connect():
-    global pool
-    pool = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1, max_size=5)
 
 async def _insert_vote_and_count(guild_id: int, target_id: int, voter_id: int, reason: str | None):
     """Нэг хүний санал оруулах (давхцвал алгасна), дараа нь нийт саналыг тоолж буцаана."""
@@ -1087,19 +1081,11 @@ async def on_ready():
     asyncio.create_task(session_timeout_checker())
 async def initialize_bot():
     try:
-        await init_pool()
-        print("✅ DB pool initialized.")
-    except Exception as e:
-        print("❌ DB pool initialization алдаа:", e)
-
-    try:
         await load_session_state()
         print("📥 Session state амжилттай ачаалагдлаа.")
     except Exception as e:
         print("❌ Session ачаалах үед алдаа гарлаа:", e)
 
-    await db_connect()
-    print(f"Logged in as {bot.user}")
 
 # 🧩 Command: ping
 @bot.tree.command(name="ping", description="Bot-ийн latency-г шалгана")
