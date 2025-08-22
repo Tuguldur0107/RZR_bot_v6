@@ -1015,7 +1015,7 @@ async def _send_with_banner(interaction: discord.Interaction, content: str, *, b
         await sender(content=msg, ephemeral=ephemeral)
 
 
-KICK_VOTE_THRESHOLD = 5
+KICK_VOTE_THRESHOLD = 10
 pool: asyncpg.Pool | None = None
 
 # ---- DB connect (DDL байхгүй!) ----
@@ -2843,46 +2843,101 @@ async def kick_cmd(interaction: discord.Interaction, user: discord.Member, reaso
     user="Зорилтот хэрэглэгчээр шүүх (сонголт)",
     limit="Жагсаалтын мөрийн тоо (default 15)"
 )
-async def kick_review_cmd(interaction: discord.Interaction,
-                          user: discord.Member | None = None,
-                          limit: int = 15):
+async def kick_review_cmd(
+    interaction: discord.Interaction,
+    user: discord.Member | None = None,
+    limit: int = 15
+):
     await interaction.response.defer(ephemeral=True)
 
     async with pool.acquire() as con:
+        # --- 1) Нэг хүний дэлгэрэнгүй (вотер + шалтгаан + цаг) ---
         if user:
             rows = await con.fetch(
-                """SELECT voter_id, reason, created_at
-                   FROM kick_votes
-                   WHERE guild_id=$1 AND target_id=$2
-                   ORDER BY created_at ASC""",
+                """
+                SELECT voter_id,
+                       COALESCE(NULLIF(TRIM(reason), ''), '-') AS reason,
+                       created_at
+                FROM kick_votes
+                WHERE guild_id = $1 AND target_id = $2
+                ORDER BY created_at ASC
+                """,
                 interaction.guild.id, user.id
             )
             if not rows:
                 return await interaction.followup.send("📭 Мэдээлэл алга.", ephemeral=True)
+
             lines = [f"🧾 {user.mention}-д өгсөн саналууд ({len(rows)}):"]
             for r in rows:
-                reason = (r["reason"] or "-").strip()
-                if len(reason) > 120: reason = reason[:117] + "..."
+                reason = r["reason"]
+                if len(reason) > 120:
+                    reason = reason[:117] + "…"
                 lines.append(f"- <@{r['voter_id']}>: {reason}  ({r['created_at']:%Y-%m-%d %H:%M})")
+
             text = "\n".join(lines)
-            if len(text) > 1900: text = "\n".join(lines[:1] + lines[1:limit+1]) + "\n…"
+            if len(text) > 1900:
+                trimmed = lines[:1] + lines[1:limit+1]
+                extra = len(rows) - min(len(rows), limit)
+                if extra > 0:
+                    trimmed.append(f"… (+{extra} мөр)")
+                text = "\n".join(trimmed)
+
             return await interaction.followup.send(text, ephemeral=True)
-        else:
-            rows = await con.fetch(
-                """SELECT target_id, COUNT(*)::int AS votes
-                   FROM kick_votes
-                   WHERE guild_id=$1
-                   GROUP BY target_id
-                   ORDER BY votes DESC, target_id
-                   LIMIT $2""",
-                interaction.guild.id, limit
+
+        # --- 2) Хураангуй жагсаалт: хэн хэдэн санал авсан + санал өгөгчдийн нэр/шалтгаан ---
+        summary = await con.fetch(
+            """
+            SELECT target_id, COUNT(*)::int AS votes
+            FROM kick_votes
+            WHERE guild_id = $1
+            GROUP BY target_id
+            ORDER BY votes DESC, target_id
+            LIMIT $2
+            """,
+            interaction.guild.id, limit
+        )
+        if not summary:
+            return await interaction.followup.send("📭 Одоогоор санал алга.", ephemeral=True)
+
+        DETAILS_PER_TARGET_MAX = 12  # нэг зорилтот дээр харуулах дээд мөр
+        lines = ["🧾 Хамгийн их санал авсан хэрэглэгчид (санал өгөгч + шалтгаан):"]
+
+        for s in summary:
+            tgt = s["target_id"]
+            total = s["votes"]
+            lines.append(f"- <@{tgt}> — **{total}** санал")
+
+            details = await con.fetch(
+                """
+                SELECT voter_id,
+                       COALESCE(NULLIF(TRIM(reason), ''), '-') AS reason
+                FROM kick_votes
+                WHERE guild_id = $1 AND target_id = $2
+                ORDER BY created_at ASC
+                LIMIT $3
+                """,
+                interaction.guild.id, tgt, DETAILS_PER_TARGET_MAX
             )
-            if not rows:
-                return await interaction.followup.send("📭 Одоогоор санал алга.", ephemeral=True)
-            lines = ["🧾 Хамгийн их саналтай хэрэглэгчид:"]
-            for r in rows:
-                lines.append(f"- <@{r['target_id']}> — **{r['votes']}** санал")
-            return await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+            for d in details:
+                reason = d["reason"]
+                if len(reason) > 100:
+                    reason = reason[:97] + "…"
+                lines.append(f"    · <@{d['voter_id']}>: {reason}")
+
+            if total > len(details):
+                lines.append(f"    · … (+{total - len(details)} санал)")
+
+            # 2000 тэмдэгтийн лимит давуулахгүйн тул аюулгүйн таслалт
+            if sum(len(l) + 1 for l in lines) > 1800:
+                lines.append("…")
+                break
+
+        text = "\n".join(lines)
+        if len(text) > 2000:
+            text = text[:1990] + "…"
+
+        return await interaction.followup.send(text, ephemeral=True)
 
 
 
