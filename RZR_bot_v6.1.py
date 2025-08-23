@@ -2817,21 +2817,27 @@ async def kick_cmd(interaction: discord.Interaction, user: discord.Member, reaso
     await interaction.followup.send(f"{msg} Нийт: **{count}/{KICK_VOTE_THRESHOLD}**. Дутагдаж буй санал: **{remain}**.", ephemeral=True)
 
 # ---- /kick_review (админ) ----
-@bot.tree.command(name="kick_review", description="Админ: vote-kick саналуудыг харах (ephemeral)")
+# ---- /kick_review (админ) ----
+@bot.tree.command(name="kick_review", description="Админ: vote-kick саналуудыг харах")
 @app_commands.default_permissions(administrator=True)
 @app_commands.describe(
     user="Зорилтот хэрэглэгчээр шүүх (сонголт)",
-    limit="Жагсаалтын мөрийн тоо (default 15)"
+    limit="Жагсаалтын мөрийн тоо (default 15)",
+    public="Нийтэд харагдуулах уу? (default: false)"
 )
 async def kick_review_cmd(
     interaction: discord.Interaction,
     user: discord.Member | None = None,
-    limit: int = 15
+    limit: int = 15,
+    public: bool = False,           # ⬅️ нэмлээ
 ):
-    await interaction.response.defer(ephemeral=True)
+    eph = not public                 # ⬅️ нэг хувьсагчаар удирдъя
+    try:
+        await interaction.response.defer(ephemeral=eph)
+    except discord.errors.InteractionResponded:
+        pass
 
     async with pool.acquire() as con:
-        # --- 1) Нэг хүний дэлгэрэнгүй (вотер + шалтгаан + цаг) ---
         if user:
             rows = await con.fetch(
                 """
@@ -2845,26 +2851,23 @@ async def kick_review_cmd(
                 interaction.guild.id, user.id
             )
             if not rows:
-                return await interaction.followup.send("📭 Мэдээлэл алга.", ephemeral=True)
+                return await interaction.followup.send("📭 Мэдээлэл алга.", ephemeral=eph)
 
             lines = [f"🧾 {user.mention}-д өгсөн саналууд ({len(rows)}):"]
             for r in rows:
                 reason = r["reason"]
-                if len(reason) > 120:
-                    reason = reason[:117] + "…"
+                if len(reason) > 120: reason = reason[:117] + "…"
                 lines.append(f"- <@{r['voter_id']}>: {reason}  ({r['created_at']:%Y-%m-%d %H:%M})")
 
             text = "\n".join(lines)
             if len(text) > 1900:
                 trimmed = lines[:1] + lines[1:limit+1]
                 extra = len(rows) - min(len(rows), limit)
-                if extra > 0:
-                    trimmed.append(f"… (+{extra} мөр)")
+                if extra > 0: trimmed.append(f"… (+{extra} мөр)")
                 text = "\n".join(trimmed)
 
-            return await interaction.followup.send(text, ephemeral=True)
+            return await interaction.followup.send(text, ephemeral=eph)
 
-        # --- 2) Хураангуй жагсаалт: хэн хэдэн санал авсан + санал өгөгчдийн нэр/шалтгаан ---
         summary = await con.fetch(
             """
             SELECT target_id, COUNT(*)::int AS votes
@@ -2877,14 +2880,13 @@ async def kick_review_cmd(
             interaction.guild.id, limit
         )
         if not summary:
-            return await interaction.followup.send("📭 Одоогоор санал алга.", ephemeral=True)
+            return await interaction.followup.send("📭 Одоогоор санал алга.", ephemeral=eph)
 
-        DETAILS_PER_TARGET_MAX = 12  # нэг зорилтот дээр харуулах дээд мөр
+        DETAILS_PER_TARGET_MAX = 12
         lines = ["🧾 Хамгийн их санал авсан хэрэглэгчид (санал өгөгч + шалтгаан):"]
 
         for s in summary:
-            tgt = s["target_id"]
-            total = s["votes"]
+            tgt = s["target_id"]; total = s["votes"]
             lines.append(f"- <@{tgt}> — **{total}** санал")
 
             details = await con.fetch(
@@ -2901,23 +2903,18 @@ async def kick_review_cmd(
 
             for d in details:
                 reason = d["reason"]
-                if len(reason) > 100:
-                    reason = reason[:97] + "…"
+                if len(reason) > 100: reason = reason[:97] + "…"
                 lines.append(f"    · <@{d['voter_id']}>: {reason}")
 
             if total > len(details):
                 lines.append(f"    · … (+{total - len(details)} санал)")
 
-            # 2000 тэмдэгтийн лимит давуулахгүйн тул аюулгүйн таслалт
-            if sum(len(l) + 1 for l in lines) > 1800:
-                lines.append("…")
-                break
+            if sum(len(l)+1 for l in lines) > 1800:
+                lines.append("…"); break
 
         text = "\n".join(lines)
-        if len(text) > 2000:
-            text = text[:1990] + "…"
-
-        return await interaction.followup.send(text, ephemeral=True)
+        if len(text) > 2000: text = text[:1990] + "…"
+        return await interaction.followup.send(text, ephemeral=eph)
 
 
 
