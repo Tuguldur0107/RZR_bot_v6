@@ -1076,6 +1076,11 @@ async def _can_kick(guild: discord.Guild, target: discord.Member) -> tuple[bool,
         return False, "Ботын **Kick Members** эрх дутуу байна."
     return True, None
 
+def _shorten(s: str, limit: int) -> str:
+    s = (s or "").replace("\n", " ").strip()
+    return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
 
 # 🧬 Start
 @bot.event
@@ -2776,9 +2781,14 @@ async def kick_review_cmd(
     except discord.errors.InteractionResponded:
         pass
 
+    # Хэтэрхий өндөр утга орж ирвэл embed талбарыг давахаас сэргийлж 25-д хавчуулна
+    limit = max(1, min(limit, 25))
+    DETAILS_PER_TARGET_MAX = 12  # нэг хэрэглэгчийн дор харуулах дээд мөр
+
     con, from_pool = await _db_acquire()
     try:
         if user:
+            # --- Нэг зорилтот хэрэглэгчийн дэлгэрэнгүйг embed-ээр ---
             rows = await con.fetch(
                 """
                 SELECT voter_id,
@@ -2794,23 +2804,29 @@ async def kick_review_cmd(
             if not rows:
                 return await interaction.followup.send("📭 Мэдээлэл алга.", ephemeral=eph)
 
-            lines = [f"🧾 {user.mention}-д өгсөн саналууд ({len(rows)}):"]
-            for r in rows:
-                reason = r["reason"]
-                if len(reason) > 120: reason = reason[:117] + "…"
-                lines.append(f"- <@{r['voter_id']}>: {reason}  ({r['created_at']:%Y-%m-%d %H:%M})")
+            emb = discord.Embed(
+                title=f"Vote-kick — {user.display_name} ({len(rows)} санал)",
+                description=f"{user.mention}-д өгсөн саналууд:",
+                color=discord.Color.orange(),
+                timestamp=datetime.now(timezone.utc),
+            )
+            lines = []
+            for r in rows[:limit]:
+                reason = _shorten(r["reason"], 120)
+                created = r["created_at"].strftime("%Y-%m-%d %H:%M")
+                lines.append(f"• <@{r['voter_id']}> — {reason}  `{created}`")
+            if len(rows) > limit:
+                lines.append(f"… (+{len(rows) - limit} мөр)")
 
-            text = "\n".join(lines)
-            if len(text) > 1900:
-                trimmed = lines[:1] + lines[1:limit+1]
-                extra = len(rows) - min(len(rows), limit)
-                if extra > 0: trimmed.append(f"… (+{extra} мөр)")
-                text = "\n".join(trimmed)
+            emb.add_field(name="Санал өгөгчид", value="\n".join(lines), inline=False)
+            emb.set_footer(text=f"Сервер: {interaction.guild.name}")
+            try:
+                return await interaction.followup.send(embed=emb, ephemeral=eph)
+            except discord.Forbidden:
+                # Embed эрхгүй сувгийн фоллбэк — энгийн текст
+                return await interaction.followup.send("\n".join(lines), ephemeral=eph)
 
-            return await interaction.followup.send(text, ephemeral=eph)
-
-        # ---- Хураангуй: top target-ууд + санал өгөгчдийн нэр/шалтгаан (нэг асуулгаар) ----
-        DETAILS_PER_TARGET_MAX = 12
+        # --- Хураангуй: топ зорилтууд + санал өгөгчдийн богино жагсаалт (нэг асуулгаар) ---
         rows = await con.fetch(
             """
             WITH top_targets AS (
@@ -2846,27 +2862,64 @@ async def kick_review_cmd(
         if not rows:
             return await interaction.followup.send("📭 Одоогоор санал алга.", ephemeral=eph)
 
-        grouped = {}
+        # Group-лох
+        grouped: dict[int, dict] = {}
         for r in rows:
             tgt = r["target_id"]; votes = r["votes"]
             g = grouped.setdefault(tgt, {"votes": votes, "details": []})
             if r["voter_id"] is not None:
                 g["details"].append((r["voter_id"], r["reason"]))
 
-        lines = ["🧾 Хамгийн их санал авсан хэрэглэгчид (санал өгөгч + шалтгаан):"]
+        # Embed-үүд: нэг зорилтот = нэг field (уншихад амар)
+        emb = discord.Embed(
+            title="Vote-kick — Топ зорилтууд",
+            description="Хамгийн их санал авсан хэрэглэгчид (санал өгөгч + шалтгаан):",
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc),
+        )
         for tgt, data in grouped.items():
             total = data["votes"]
-            lines.append(f"- <@{tgt}> — **{total}** санал")
+            name = f"<@{tgt}> — **{total}** санал"
+            # Талбарын 1024 тэмдэгт лимитийг баримталж, мөрүүдийг багцалж багтаана
+            vals, cur = [], ""
             for voter_id, reason in data["details"]:
-                if len(reason) > 100: reason = reason[:97] + "…"
-                lines.append(f"    · <@{voter_id}>: {reason}")
-            if sum(len(l)+1 for l in lines) > 1800:
-                lines.append("…"); break
+                line = f"• <@{voter_id}> — {_shorten(reason, 100)}"
+                if len(cur) + len(line) + 1 > 1000:
+                    vals.append(cur)
+                    cur = line
+                else:
+                    cur = (cur + "\n" + line) if cur else line
+            if cur:
+                vals.append(cur)
+            if total > len(data["details"]):
+                extra = total - len(data["details"])
+                tail = f"\n… (+{extra} санал)"
+                if len(vals[-1]) + len(tail) <= 1024:
+                    vals[-1] += tail
+                else:
+                    vals.append(tail)
 
-        text = "\n".join(lines)
-        if len(text) > 2000: text = text[:1990] + "…"
-        return await interaction.followup.send(text, ephemeral=eph)
+            # Нэг зорилтод олон мөр багтвал хэд хэдэн field болгон хуваана
+            for i, v in enumerate(vals):
+                emb.add_field(
+                    name=name if i == 0 else "ᅠ",  # дараагийн field-д хоосон толгой
+                    value=v,
+                    inline=False
+                )
 
+        emb.set_footer(text=f"Сервер: {interaction.guild.name}")
+        try:
+            return await interaction.followup.send(embed=emb, ephemeral=eph)
+        except discord.Forbidden:
+            # Embed эрхгүй сувгийн фоллбэк
+            lines = ["🧾 Хамгийн их санал авсан хэрэглэгчид:"]
+            for tgt, data in grouped.items():
+                lines.append(f"- <@{tgt}> — **{data['votes']}** санал")
+                for voter_id, reason in data["details"]:
+                    lines.append(f"    · <@{voter_id}>: {_shorten(reason, 100)}")
+            text = "\n".join(lines)
+            if len(text) > 2000: text = text[:1990] + "…"
+            return await interaction.followup.send(text, ephemeral=eph)
     finally:
         await _db_release(con, from_pool)
 
