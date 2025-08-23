@@ -1014,12 +1014,12 @@ async def _send_with_banner(interaction: discord.Interaction, content: str, *, b
         await sender(content=msg, ephemeral=ephemeral)
 
 TIER_META = {
-    "S": {"color": 0xF59E0B, "emoji": "🏆"},
-    "A": {"color": 0x22C55E, "emoji": "🟢"},
-    "B": {"color": 0x3B82F6, "emoji": "🔵"},
-    "C": {"color": 0x64748B, "emoji": "🟣"},
-    "D": {"color": 0xEF4444, "emoji": "⚪"},
-    "E": {"color": 0x94A3B8, "emoji": "🟥"},
+    "S": {"color": 0xF59E0B, "emoji": "🏆"},  # amber
+    "A": {"color": 0x22C55E, "emoji": "🟢"},  # green
+    "B": {"color": 0x3B82F6, "emoji": "🔵"},  # blue
+    "C": {"color": 0x9333EA, "emoji": "🟣"},  # purple
+    "D": {"color": 0xE5E7EB, "emoji": "⚪"},  # light gray (white-ish)
+    "E": {"color": 0xEF4444, "emoji": "🟥"},  # red
 }
 
 DEFAULT_TIER_STEP = 45  # data-д хил өгөөгүй үед харагдуулах fallback алхам
