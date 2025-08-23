@@ -2228,6 +2228,7 @@ async def undo_last_match(interaction: discord.Interaction):
         print("❌ Match буцаах үед алдаа гарлаа:", e)
         await interaction.followup.send("❌ Match буцаах үед алдаа гарлаа.")
 
+# --- /my_score: таны tier • score • weight + score-based progress ---
 @bot.tree.command(name="my_score", description="Таны tier, score, weight-ийг харуулна")
 async def my_score(interaction: discord.Interaction):
     try:
@@ -2245,19 +2246,21 @@ async def my_score(interaction: discord.Interaction):
     score = int(data.get("score", 0))
     username = data.get("username") or interaction.user.display_name
 
-    # Weight (calculate_weight ашиглана)
+    # Weight (байгаа calculate_weight-аа ашиглана)
     try:
         weight = int(calculate_weight(data))
     except Exception:
         base = int(TIER_WEIGHT.get(raw_tier, 0))
         weight = max(base + score, 0)
 
-    # Progress = weight / next_tier_base
-    curr_w, next_base, next_tier = _progress_to_next_tier_by_weight(data, raw_tier)
-    bar, pct = _progress_bar(curr_w, 0, next_base, width=18)  # 0..next_base
+    # --- SCORE-BASED PROGRESS (–5..+5 → 10 алхам) ---
+    s = score
+    s_clamped = max(-5, min(5, s))          # прогрессэд ашиглах оноо
+    steps = s_clamped + 5                   # 0..10 алхам
+    bar, pct = _progress_bar(s_clamped, -5, 5, width=18)
     pct_txt = f"{round(pct * 100)}%"
 
-    # Гоо зүй
+    # Embed
     meta = TIER_META.get(raw_tier.upper(), TIER_META.get(raw_tier, TIER_META["?"]))
     emb = discord.Embed(
         title=f"{meta['emoji']} {username}",
@@ -2281,11 +2284,11 @@ async def my_score(interaction: discord.Interaction):
     if stats:
         emb.add_field(name="Товч статистик", value="\n".join(stats), inline=False)
 
+    # Прогресс: бар + хувь + 10 алхмаас хэдийг нь дүүргэсэн
     if bar:
-        nxt_txt = f" → **{next_tier}**" if next_tier else ""
         emb.add_field(
             name="Дараагийн шат хүртэл",
-            value=f"`{bar}`  {pct_txt} • **{_num(curr_w)} / {_num(next_base)}**{nxt_txt}",
+            value=f"`{bar}`  {pct_txt} • **{_num(steps)}/10**",
             inline=False
         )
 
@@ -2300,10 +2303,11 @@ async def my_score(interaction: discord.Interaction):
             f"Tier: {raw_tier}",
             f"Score: {_num(score)}",
             f"Weight: {_num(weight)}",
-            f"Progress: {pct_txt} ({_num(curr_w)}/{_num(next_base)})",
+            f"Progress: {pct_txt} ({_num(steps)}/10)",
         ]
         await interaction.followup.send("\n".join(lines))
 
+# --- /user_score: бусдын tier • score • weight + score-based progress (public) ---
 @bot.tree.command(name="user_score", description="Бусад тоглогчийн tier, score, weight-ийг харуулна")
 @app_commands.describe(user="Оноог нь харах discord хэрэглэгч")
 async def user_score(interaction: discord.Interaction, user: discord.Member):
@@ -2329,9 +2333,11 @@ async def user_score(interaction: discord.Interaction, user: discord.Member):
         base = int(TIER_WEIGHT.get(raw_tier, 0))
         weight = max(base + score, 0)
 
-    # Progress = weight / next_tier_base
-    curr_w, next_base, next_tier = _progress_to_next_tier_by_weight(data, raw_tier)
-    bar, pct = _progress_bar(curr_w, 0, next_base, width=18)
+    # --- SCORE-BASED PROGRESS (–5..+5 → 10 алхам) ---
+    s = score
+    s_clamped = max(-5, min(5, s))
+    steps = s_clamped + 5
+    bar, pct = _progress_bar(s_clamped, -5, 5, width=18)
     pct_txt = f"{round(pct * 100)}%"
 
     # Embed
@@ -2359,10 +2365,9 @@ async def user_score(interaction: discord.Interaction, user: discord.Member):
         emb.add_field(name="Товч статистик", value="\n".join(stats), inline=False)
 
     if bar:
-        nxt_txt = f" → **{next_tier}**" if next_tier else ""
         emb.add_field(
             name="Дараагийн шат хүртэл",
-            value=f"`{bar}`  {pct_txt} • **{_num(curr_w)} / {_num(next_base)}**{nxt_txt}",
+            value=f"`{bar}`  {pct_txt} • **{_num(steps)}/10**",
             inline=False
         )
 
@@ -2376,7 +2381,7 @@ async def user_score(interaction: discord.Interaction, user: discord.Member):
             f"Tier: {raw_tier}",
             f"Score: {_num(score)}",
             f"Weight: {_num(weight)}",
-            f"Progress: {pct_txt} ({_num(curr_w)}/{_num(next_base)})",
+            f"Progress: {pct_txt} ({_num(steps)}/10)",
         ]
         await interaction.followup.send("\n".join(lines))
 
