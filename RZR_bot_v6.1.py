@@ -1013,7 +1013,6 @@ async def _send_with_banner(interaction: discord.Interaction, content: str, *, b
             msg += "\n_(attach_files эрх алга — зураг хавсаргаж чадсангүй)_"
         await sender(content=msg, ephemeral=ephemeral)
 
-
 KICK_VOTE_THRESHOLD = 10
 
 async def _db_acquire(timeout: float = 2.0):
@@ -1042,11 +1041,8 @@ async def _db_release(con, from_pool: bool):
         pass
     
 async def _insert_vote_and_count(guild_id: int, target_id: int, voter_id: int, reason: str | None):
-    """
-    Нэг хүний санал оруулаад (давхцвал алгасна), дараа нь
-    тэр target-ийн нийт саналыг НЭГ асуулгаар буцаана (DB round-trip багасна).
-    """
-    async with pool.acquire() as con:
+    con, from_pool = await _db_acquire()  # ⬅️ фоллбэктэй acquire
+    try:
         row = await con.fetchrow(
             """
             WITH ins AS (
@@ -1057,14 +1053,14 @@ async def _insert_vote_and_count(guild_id: int, target_id: int, voter_id: int, r
             )
             SELECT
               EXISTS(SELECT 1 FROM ins) AS inserted,
-              (SELECT COUNT(*)::int
-                 FROM kick_votes
-                WHERE guild_id=$1 AND target_id=$2) AS count
+              (SELECT COUNT(*)::int FROM kick_votes WHERE guild_id=$1 AND target_id=$2) AS count
             """,
             guild_id, target_id, voter_id, (reason or "")[:240],
             timeout=4
         )
         return bool(row["inserted"]), int(row["count"])
+    finally:
+        await _db_release(con, from_pool)
 
 async def _can_kick(guild: discord.Guild, target: discord.Member) -> tuple[bool, str | None]:
     me = guild.me
@@ -1079,6 +1075,8 @@ async def _can_kick(guild: discord.Guild, target: discord.Member) -> tuple[bool,
     if not me.guild_permissions.kick_members:
         return False, "Ботын **Kick Members** эрх дутуу байна."
     return True, None
+
+
 # 🧬 Start
 @bot.event
 async def on_ready():
@@ -2306,7 +2304,6 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
         lines.append(f"<@{uid}>: {data['score']} (Tier: {data['tier']})")
 
     await interaction.followup.send("✅ Оноо шинэчлэгдлээ:\n" + "\n".join(lines))
-
 class Donor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -2726,99 +2723,7 @@ async def diag(interaction: discord.Interaction):
         ephemeral=True
     )
 
-@bot.tree.command(name="diag_dryrun", description="Админ: DRY-RUN оношилгоо (ямар ч өгөгдөл хадгалахгүй)")
-@app_commands.describe(
-    mode='Балансын тест: "mock" (анхдагч) эсвэл "real" (GPT дуудна, хадгалж үлдээхгүй)'
-)
-async def diag_dryrun(interaction: discord.Interaction, mode: str = "mock"):
-    # 1) зөвшөөрөл
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("⛔️ Зөвхөн админ.", ephemeral=True)
-        return
-    try:
-        await interaction.response.defer(ephemeral=True)
-    except discord.errors.InteractionResponded:
-        return
-
-    messages = []
-
-    # 2) DB DRY-RUN — TEMP TABLE ашигладаг тул ямар ч ул мөр үлдэхгүй
-    db_ok, db_msg = False, ""
-    try:
-        from database import connect
-        conn = await connect()  # asyncpg.connect(DATABASE_URL) ашигладаг:contentReference[oaicite:1]{index=1}
-        try:
-            async with conn.transaction():
-                await conn.execute("CREATE TEMP TABLE z_diag(x int);")
-                await conn.execute("INSERT INTO z_diag(x) VALUES (1),(2),(3);")
-                cnt = await conn.fetchval("SELECT COUNT(*) FROM z_diag;")
-                db_ok = (cnt == 3)
-            # TEMP TABLE нь transaction-оос хамааралгүйгээр сешн дуусмагц устна
-            db_msg = "DB OK (temp write/read ажиллалаа)" if db_ok else "DB WARN (unexpected count)"
-        finally:
-            await conn.close()
-    except Exception as e:
-        db_msg = f"DB FAIL: {e}"
-    messages.append(f"• {db_msg}")
-
-    # 3) OpenAI DRY-RUN — жижиг JSON тест
-    ai_ok, ai_msg = False, ""
-    try:
-        from openai import OpenAI
-        client = OpenAI()
-        resp = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "Return {\"ok\":true} as JSON only"}],
-            temperature=0,
-            max_tokens=16,
-            # Хэрвээ танай орчинд response_format дэмжихгүй бол try/except-оор унтрааж болно
-            response_format={"type": "json_object"},
-        )
-        _ = json.loads(resp.choices[0].message.content)
-        ai_ok, ai_msg = True, "OpenAI OK"
-    except Exception as e:
-        ai_msg = f"OpenAI FAIL: {e}"
-    messages.append(f"• {ai_msg}")
-
-    # 4) Discord permission — nickname edit
-    me = interaction.guild.me
-    can_nick = bool(me.guild_permissions.manage_nicknames)
-    perm_msg = "Nick perm OK" if can_nick else "Nick perm MISSING"
-    messages.append(f"• {perm_msg}")
-
-    # 5) Балансын DRY‑RUN (хуудуун GPT MOCK эсвэл бодитоор GPT дуудаад хадгалалгүй харуулна)
-    try:
-        # Жин үүсгэх: 10 тоглогч, 2 баг * 5 хүн
-        team_count, players_per_team = 2, 5
-        fake_players = [{"id": 10_000 + i, "power": random.randint(20, 120)} for i in range(team_count*players_per_team)]
-        weights = {p["id"]: p["power"] for p in fake_players}
-
-        if mode.lower() == "real":
-            # бодитоор GPT-ээс баг авна (teams), ГЭХДЭЭ хадгалахгүй
-            teams = await call_gpt_balance_api(team_count, players_per_team, fake_players)  # таны одоогийн функц:contentReference[oaicite:2]{index=2}
-            # локал сайжруулалт (swap) — илүү сайн баланс
-            teams, cost = local_refine(teams, weights, max_rounds=100)  # таны функц:contentReference[oaicite:3]{index=3}
-            mode_note = f"gpt+local_refine (diff={max(sum(weights.get(u,0) for u in t) for t in teams) - min(sum(weights.get(u,0) for u in t) for t in teams)})"
-        else:
-            # MOCK: greedy эсвэл reflector ашиглаж түр хөрвүүлээд (кодод чинь бий):contentReference[oaicite:4]{index=4}
-            teams = greedy_teams(weights, team_count, players_per_team)
-            teams, cost = local_refine(teams, weights, max_rounds=100)
-            mode_note = f"mock+local_refine (diff={cost})"
-
-        # Хариуг зөвхөн шалгах зорилгоор харуулна — DB/session ТООРХОЙЛТ ХИЙХГҮЙ
-        totals = [sum(weights.get(uid,0) for uid in t) for t in teams]
-        lines = [f"🧪 Balance DRY‑RUN — {mode_note}",
-                 f"Totals: {totals} (min={min(totals)}, max={max(totals)})"]
-        for i, t in enumerate(teams, 1):
-            lines.append(f"#{i} → " + ", ".join(f"{uid}:{weights[uid]}" for uid in t))
-        messages.append("\n".join(lines))
-    except Exception as e:
-        messages.append(f"• Balance DRY‑RUN FAIL: {e}")
-
-    # 6) Эцсийн тайлан (эпhemeral)
-    await interaction.followup.send("🩺 **DRY‑RUN DIAG**\n" + "\n".join(messages), ephemeral=True)
-
-@bot.tree.command(name="kick", description="Vote-kick — саналаа өгнө (5 хүрвэл kick)")
+@bot.tree.command(name="kick", description="Vote-kick — саналаа өгнө (10 хүрвэл kick)")
 @app_commands.describe(user="Кик саналд оруулах хэрэглэгч", reason="Таны шалтгаан (сонголт)")
 async def kick_cmd(interaction: discord.Interaction, user: discord.Member, reason: str = ""):
     await interaction.response.defer(ephemeral=True)
@@ -2852,68 +2757,119 @@ async def kick_cmd(interaction: discord.Interaction, user: discord.Member, reaso
     remain = KICK_VOTE_THRESHOLD - count
     await interaction.followup.send(f"{msg} Нийт: **{count}/{KICK_VOTE_THRESHOLD}**. Дутагдаж буй санал: **{remain}**.", ephemeral=True)
 
-@bot.tree.command(name="kick", description="Vote-kick — саналаа өгнө (5 хүрвэл kick)")
+@bot.tree.command(name="kick_review", description="Админ: vote-kick саналуудыг харах")
+@app_commands.default_permissions(administrator=True)
 @app_commands.describe(
-    user="Кик саналд оруулах хэрэглэгч",
-    reason="Таны шалтгаан (сонголт)"
+    user="Зорилтот хэрэглэгчээр шүүх (сонголт)",
+    limit="Жагсаалтын мөрийн тоо (default 15)",
+    public="Нийтэд харагдуулах уу? (default: false)"
 )
-async def kick_cmd(interaction: discord.Interaction, user: discord.Member, reason: str = ""):
-    await interaction.response.defer(ephemeral=True)
-
-    # Өөрийгөө саналаар хөөхээс хамгаалалт
-    if user.id == interaction.user.id:
-        return await interaction.followup.send("😅 Өөрийгөө vote-kick хийх боломжгүй.", ephemeral=True)
-
-    # Kick боломжтой эсэхийг урьдчилан шалгана
-    ok, why = await _can_kick(interaction.guild, user)
-
-    # Санал оруулах + нийт тоог авах (ачаалал багатай нэг асуулгаар)
+async def kick_review_cmd(
+    interaction: discord.Interaction,
+    user: discord.Member | None = None,
+    limit: int = 15,
+    public: bool = False,
+):
+    eph = not public
     try:
-        inserted, count = await _insert_vote_and_count(
-            interaction.guild.id, user.id, interaction.user.id, reason
+        await interaction.response.defer(ephemeral=eph)
+    except discord.errors.InteractionResponded:
+        pass
+
+    con, from_pool = await _db_acquire()
+    try:
+        if user:
+            rows = await con.fetch(
+                """
+                SELECT voter_id,
+                       COALESCE(NULLIF(TRIM(reason), ''), '-') AS reason,
+                       created_at
+                FROM kick_votes
+                WHERE guild_id = $1 AND target_id = $2
+                ORDER BY created_at ASC
+                """,
+                interaction.guild.id, user.id,
+                timeout=5
+            )
+            if not rows:
+                return await interaction.followup.send("📭 Мэдээлэл алга.", ephemeral=eph)
+
+            lines = [f"🧾 {user.mention}-д өгсөн саналууд ({len(rows)}):"]
+            for r in rows:
+                reason = r["reason"]
+                if len(reason) > 120: reason = reason[:117] + "…"
+                lines.append(f"- <@{r['voter_id']}>: {reason}  ({r['created_at']:%Y-%m-%d %H:%M})")
+
+            text = "\n".join(lines)
+            if len(text) > 1900:
+                trimmed = lines[:1] + lines[1:limit+1]
+                extra = len(rows) - min(len(rows), limit)
+                if extra > 0: trimmed.append(f"… (+{extra} мөр)")
+                text = "\n".join(trimmed)
+
+            return await interaction.followup.send(text, ephemeral=eph)
+
+        # ---- Хураангуй: top target-ууд + санал өгөгчдийн нэр/шалтгаан (нэг асуулгаар) ----
+        DETAILS_PER_TARGET_MAX = 12
+        rows = await con.fetch(
+            """
+            WITH top_targets AS (
+              SELECT target_id, COUNT(*)::int AS votes
+              FROM kick_votes
+              WHERE guild_id = $1
+              GROUP BY target_id
+              ORDER BY votes DESC, target_id
+              LIMIT $2
+            ),
+            details AS (
+              SELECT kv.target_id,
+                     kv.voter_id,
+                     COALESCE(NULLIF(TRIM(kv.reason), ''), '-') AS reason,
+                     kv.created_at,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY kv.target_id
+                       ORDER BY kv.created_at ASC
+                     ) AS rn
+              FROM kick_votes kv
+              JOIN top_targets tt ON tt.target_id = kv.target_id
+              WHERE kv.guild_id = $1
+            )
+            SELECT tt.target_id, tt.votes,
+                   d.voter_id, d.reason, d.created_at, d.rn
+            FROM top_targets tt
+            LEFT JOIN details d ON d.target_id = tt.target_id AND d.rn <= $3
+            ORDER BY tt.votes DESC, tt.target_id, d.rn ASC
+            """,
+            interaction.guild.id, limit, DETAILS_PER_TARGET_MAX,
+            timeout=6
         )
-    except Exception as e:
-        # DB алдаа гарвал энд илэрхийлээд зогсоочихно
-        return await interaction.followup.send(f"⚠️ DB алдаа: {e}", ephemeral=True)
+        if not rows:
+            return await interaction.followup.send("📭 Одоогоор санал алга.", ephemeral=eph)
 
-    # Хэрэглэгчид өгөх суурь мессэж
-    base_msg = "🗳 Санал бүртгэгдлээ." if inserted else "📌 Таны санал өмнө бүртгэгдсэн."
+        grouped = {}
+        for r in rows:
+            tgt = r["target_id"]; votes = r["votes"]
+            g = grouped.setdefault(tgt, {"votes": votes, "details": []})
+            if r["voter_id"] is not None:
+                g["details"].append((r["voter_id"], r["reason"]))
 
-    # Хэрэв анхнаасаа kick хийх боломж байхгүй бол (админ, owner, role гэх мэт)
-    if not ok:
-        return await interaction.followup.send(
-            f"{base_msg} Нийт санал: **{count}/{KICK_VOTE_THRESHOLD}**. ⛔ {why}",
-            ephemeral=True
-        )
+        lines = ["🧾 Хамгийн их санал авсан хэрэглэгчид (санал өгөгч + шалтгаан):"]
+        for tgt, data in grouped.items():
+            total = data["votes"]
+            lines.append(f"- <@{tgt}> — **{total}** санал")
+            for voter_id, reason in data["details"]:
+                if len(reason) > 100: reason = reason[:97] + "…"
+                lines.append(f"    · <@{voter_id}>: {reason}")
+            if sum(len(l)+1 for l in lines) > 1800:
+                lines.append("…"); break
 
-    # Босго хүрсэн үү?
-    if count >= KICK_VOTE_THRESHOLD:
-        # Кик хийх агшин дээр дахин шалгая (роль/эрх өөрчлөгдсөн байж магад)
-        ok2, why2 = await _can_kick(interaction.guild, user)
-        if not ok2:
-            return await interaction.followup.send(
-                f"{base_msg} Нийт: **{count}/{KICK_VOTE_THRESHOLD}**. ⛔ {why2}",
-                ephemeral=True
-            )
-        try:
-            await user.kick(reason=f"Vote-kick • {count}/{KICK_VOTE_THRESHOLD} vote")
-            return await interaction.followup.send(
-                f"{base_msg} ✅ **{user}** kick хийгдлээ. (Нийт {count}/{KICK_VOTE_THRESHOLD})",
-                ephemeral=True
-            )
-        except Exception as e:
-            return await interaction.followup.send(
-                f"{base_msg} ❌ Kick амжилтгүй: {e}",
-                ephemeral=True
-            )
+        text = "\n".join(lines)
+        if len(text) > 2000: text = text[:1990] + "…"
+        return await interaction.followup.send(text, ephemeral=eph)
 
-    # Одоогоор босго хүрээгүй — үлдгийг харуулна
-    remain = KICK_VOTE_THRESHOLD - count
-    await interaction.followup.send(
-        f"{base_msg} Нийт: **{count}/{KICK_VOTE_THRESHOLD}**. "
-        f"Дутагдаж буй санал: **{remain}**.",
-        ephemeral=True
-    )
+    finally:
+        await _db_release(con, from_pool)
+
 
 # 🎯 Run
 async def main():
