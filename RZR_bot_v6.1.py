@@ -1022,7 +1022,7 @@ TIER_META = {
     "?": {"color": 0x94A3B8, "emoji": "❔"},
 }
 
-DEFAULT_TIER_STEP = 50  # data-д хил өгөөгүй үед харагдуулах fallback алхам
+DEFAULT_TIER_STEP = 45  # data-д хил өгөөгүй үед харагдуулах fallback алхам
 
 # Хүсвэл энд per-tier хилүүдээ зарлаж болно, жиш: {"4-1": (0, 50), "5-1": (0, 40)}
 TIER_BOUNDS: dict[str, tuple[int, int]] = {}
@@ -1030,6 +1030,42 @@ TIER_BOUNDS: dict[str, tuple[int, int]] = {}
 def _num(n) -> str:
     try: return f"{int(n):,}".replace(",", " ")
     except: return str(n)
+
+# --- weight-н дараагийн босгыг олох туслахууд ---
+def _get_next_tier_base(curr_tier: str) -> tuple[int | None, str | None]:
+    """TIER_WEIGHT-аас curr_tier-с ДАРААГИЙН (weight нь илүү багагүй) tier-ийг олно."""
+    if curr_tier not in TIER_WEIGHT:
+        return None, None
+    curr_base = int(TIER_WEIGHT[curr_tier])
+    nxt_tier, nxt_base = None, None
+    for t, w in TIER_WEIGHT.items():
+        try:
+            bw = int(w)
+        except Exception:
+            continue
+        if bw > curr_base and (nxt_base is None or bw < nxt_base):
+            nxt_tier, nxt_base = t, bw
+    return nxt_base, nxt_tier
+
+def _progress_to_next_tier_by_weight(data: dict, tier: str) -> tuple[int, int, str | None]:
+    """
+    Return: (current_weight, next_base_weight, next_tier)
+    next_base_weight олдохгүй (дээд tier) бол fallback = current_weight + DEFAULT_TIER_STEP
+    """
+    # одоо байгаа weight
+    try:
+        current_w = int(calculate_weight(data))
+    except Exception:
+        base = int(TIER_WEIGHT.get(tier, 0))
+        score = int(data.get("score", 0))
+        current_w = max(base + score, 0)
+
+    # дараагийн tier-ийн суурь weight
+    nxt_base, nxt_tier = _get_next_tier_base(tier)
+    if nxt_base is None:
+        nxt_base = current_w + DEFAULT_TIER_STEP  # fallback
+    return current_w, int(nxt_base), nxt_tier
+
 
 def _progress_bar(current: int, lo: int | None, hi: int | None, width: int = 18):
     if lo is None or hi is None or hi <= lo:
@@ -2204,25 +2240,25 @@ async def my_score(interaction: discord.Interaction):
     if not data:
         return await interaction.followup.send("⚠️ Таны оноо бүртгэлгүй байна.")
 
+    # Үндсэн утгууд
     raw_tier = str(data.get("tier", "?")).strip()
     score = int(data.get("score", 0))
     username = data.get("username") or interaction.user.display_name
 
-    # weight
+    # Weight (calculate_weight ашиглана)
     try:
         weight = int(calculate_weight(data))
     except Exception:
-        base_w = int(TIER_WEIGHT.get(raw_tier, 0))
-        weight = max(base_w + score, 0)
-    else:
-        base_w = int(TIER_WEIGHT.get(raw_tier, 0))
+        base = int(TIER_WEIGHT.get(raw_tier, 0))
+        weight = max(base + score, 0)
 
+    # Progress = weight / next_tier_base
+    curr_w, next_base, next_tier = _progress_to_next_tier_by_weight(data, raw_tier)
+    bar, pct = _progress_bar(curr_w, 0, next_base, width=18)  # 0..next_base
+    pct_txt = f"{round(pct * 100)}%"
+
+    # Гоо зүй
     meta = TIER_META.get(raw_tier.upper(), TIER_META.get(raw_tier, TIER_META["?"]))
-
-    # progress (илт хил байвал түүгээр, үгүй бол fallback)
-    lo, hi, explicit = _get_progress_bounds(data, raw_tier, score)
-    bar, pct = _progress_bar(score, lo, hi, width=18)
-
     emb = discord.Embed(
         title=f"{meta['emoji']} {username}",
         description="**Таны Tier • Score • Weight**",
@@ -2233,7 +2269,7 @@ async def my_score(interaction: discord.Interaction):
 
     emb.add_field(name="Tier",   value=f"**{raw_tier}**",    inline=True)
     emb.add_field(name="Score",  value=f"**{_num(score)}**", inline=True)
-    emb.add_field(name="Weight", value=f"**{_num(weight)}**", inline=True)  # ⬅️ томъёо мөрийг авч хаясан
+    emb.add_field(name="Weight", value=f"**{_num(weight)}**", inline=True)
 
     if "rank" in data:
         emb.add_field(name="Rank", value=f"#{_num(data['rank'])}", inline=True)
@@ -2246,27 +2282,33 @@ async def my_score(interaction: discord.Interaction):
         emb.add_field(name="Товч статистик", value="\n".join(stats), inline=False)
 
     if bar:
-        tail = f" • next at **{_num(hi)}**" if explicit else ""
+        nxt_txt = f" → **{next_tier}**" if next_tier else ""
         emb.add_field(
             name="Дараагийн шат хүртэл",
-            value=f"`{bar}`  {int(pct*100)}%{tail}",
+            value=f"`{bar}`  {pct_txt} • **{_num(curr_w)} / {_num(next_base)}**{nxt_txt}",
             inline=False
         )
 
     emb.set_footer(text=f"User ID: {uid}")
+
     try:
         await interaction.followup.send(embed=emb)
     except discord.Forbidden:
-        lines = [f"{meta['emoji']} {username}",
-                 f"Tier: {raw_tier}", f"Score: {_num(score)}", f"Weight: {_num(weight)}"]
-        if bar: lines.append(f"[{bar}] {int(pct*100)}%")
+        # Embed эрхгүй сувгийн fallback
+        lines = [
+            f"{meta['emoji']} {username}",
+            f"Tier: {raw_tier}",
+            f"Score: {_num(score)}",
+            f"Weight: {_num(weight)}",
+            f"Progress: {pct_txt} ({_num(curr_w)}/{_num(next_base)})",
+        ]
         await interaction.followup.send("\n".join(lines))
 
 @bot.tree.command(name="user_score", description="Бусад тоглогчийн tier, score, weight-ийг харуулна")
 @app_commands.describe(user="Оноог нь харах discord хэрэглэгч")
 async def user_score(interaction: discord.Interaction, user: discord.Member):
     try:
-        await interaction.response.defer(thinking=True)  # ⬅️ public болголоо
+        await interaction.response.defer(thinking=True)  # public
     except discord.errors.InteractionResponded:
         return
 
@@ -2275,23 +2317,25 @@ async def user_score(interaction: discord.Interaction, user: discord.Member):
     if not data:
         return await interaction.followup.send(f"⚠️ {user.mention} — оноо бүртгэлгүй байна.")
 
+    # Үндсэн утгууд
     raw_tier = str(data.get("tier", "?")).strip()
     score = int(data.get("score", 0))
     username = data.get("username") or user.display_name
 
+    # Weight
     try:
         weight = int(calculate_weight(data))
     except Exception:
-        base_w = int(TIER_WEIGHT.get(raw_tier, 0))
-        weight = max(base_w + score, 0)
-    else:
-        base_w = int(TIER_WEIGHT.get(raw_tier, 0))
+        base = int(TIER_WEIGHT.get(raw_tier, 0))
+        weight = max(base + score, 0)
 
+    # Progress = weight / next_tier_base
+    curr_w, next_base, next_tier = _progress_to_next_tier_by_weight(data, raw_tier)
+    bar, pct = _progress_bar(curr_w, 0, next_base, width=18)
+    pct_txt = f"{round(pct * 100)}%"
+
+    # Embed
     meta = TIER_META.get(raw_tier.upper(), TIER_META.get(raw_tier, TIER_META["?"]))
-
-    lo, hi, explicit = _get_progress_bounds(data, raw_tier, score)
-    bar, pct = _progress_bar(score, lo, hi, width=18)
-
     emb = discord.Embed(
         title=f"{meta['emoji']} {username}",
         description="**Тоглогчийн Tier • Score • Weight**",
@@ -2300,9 +2344,9 @@ async def user_score(interaction: discord.Interaction, user: discord.Member):
     )
     emb.set_thumbnail(url=user.display_avatar.url)
 
-    emb.add_field(name="Tier",  value=f"**{raw_tier}**",    inline=True)
-    emb.add_field(name="Score", value=f"**{_num(score)}**", inline=True)
-    emb.add_field(name="Weight", value=f"**{_num(weight)}**", inline=True)  # ⬅️ формула мөр алга
+    emb.add_field(name="Tier",   value=f"**{raw_tier}**",    inline=True)
+    emb.add_field(name="Score",  value=f"**{_num(score)}**", inline=True)
+    emb.add_field(name="Weight", value=f"**{_num(weight)}**", inline=True)
 
     if "rank" in data:
         emb.add_field(name="Rank", value=f"#{_num(data['rank'])}", inline=True)
@@ -2315,20 +2359,25 @@ async def user_score(interaction: discord.Interaction, user: discord.Member):
         emb.add_field(name="Товч статистик", value="\n".join(stats), inline=False)
 
     if bar:
-        tail = f" • next at **{_num(hi)}**" if explicit else ""
+        nxt_txt = f" → **{next_tier}**" if next_tier else ""
         emb.add_field(
             name="Дараагийн шат хүртэл",
-            value=f"`{bar}`  {int(pct*100)}%{tail}",
+            value=f"`{bar}`  {pct_txt} • **{_num(curr_w)} / {_num(next_base)}**{nxt_txt}",
             inline=False
         )
 
     emb.set_footer(text=f"User ID: {uid}")
+
     try:
         await interaction.followup.send(embed=emb)
     except discord.Forbidden:
-        lines = [f"{meta['emoji']} {username}",
-                 f"Tier: {raw_tier}", f"Score: {_num(score)}", f"Weight: {_num(weight)}"]
-        if bar: lines.append(f"[{bar}] {int(pct*100)}%")
+        lines = [
+            f"{meta['emoji']} {username}",
+            f"Tier: {raw_tier}",
+            f"Score: {_num(score)}",
+            f"Weight: {_num(weight)}",
+            f"Progress: {pct_txt} ({_num(curr_w)}/{_num(next_base)})",
+        ]
         await interaction.followup.send("\n".join(lines))
 
 @bot.tree.command(name="player_stats", description="Таны нийт win/loss статистик")
