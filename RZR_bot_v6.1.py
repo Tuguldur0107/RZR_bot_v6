@@ -5,6 +5,7 @@ import asyncio
 import traceback
 from datetime import datetime, timezone, timedelta
 import unicodedata
+import re
 
 # 🌿 Third-party modules
 import discord
