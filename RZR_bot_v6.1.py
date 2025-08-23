@@ -1031,6 +1031,41 @@ def _num(n) -> str:
     try: return f"{int(n):,}".replace(",", " ")
     except: return str(n)
 
+# --- weight-н дараагийн босгыг олох туслахууд ---
+def _get_next_tier_base(curr_tier: str) -> tuple[int | None, str | None]:
+    """TIER_WEIGHT-аас curr_tier-с ДАРААГИЙН (weight нь илүү багагүй) tier-ийг олно."""
+    if curr_tier not in TIER_WEIGHT:
+        return None, None
+    curr_base = int(TIER_WEIGHT[curr_tier])
+    nxt_tier, nxt_base = None, None
+    for t, w in TIER_WEIGHT.items():
+        try:
+            bw = int(w)
+        except Exception:
+            continue
+        if bw > curr_base and (nxt_base is None or bw < nxt_base):
+            nxt_tier, nxt_base = t, bw
+    return nxt_base, nxt_tier
+
+def _progress_to_next_tier_by_weight(data: dict, tier: str) -> tuple[int, int, str | None]:
+    """
+    Return: (current_weight, next_base_weight, next_tier)
+    next_base_weight олдохгүй (дээд tier) бол fallback = current_weight + DEFAULT_TIER_STEP
+    """
+    # одоо байгаа weight
+    try:
+        current_w = int(calculate_weight(data))
+    except Exception:
+        base = int(TIER_WEIGHT.get(tier, 0))
+        score = int(data.get("score", 0))
+        current_w = max(base + score, 0)
+
+    # дараагийн tier-ийн суурь weight
+    nxt_base, nxt_tier = _get_next_tier_base(tier)
+    if nxt_base is None:
+        nxt_base = current_w + DEFAULT_TIER_STEP  # fallback
+    return current_w, int(nxt_base), nxt_tier
+
 def _progress_bar(current: int, lo: int | None, hi: int | None, width: int = 18):
     if lo is None or hi is None or hi <= lo:
         return None, 0.0
@@ -1038,6 +1073,31 @@ def _progress_bar(current: int, lo: int | None, hi: int | None, width: int = 18)
     pct = max(0.0, min(1.0, pct))
     filled = int(round(pct * width))
     return "█" * filled + "░" * (width - filled), pct
+
+def _get_progress_bounds(data: dict, tier: str, score: int) -> tuple[int, int, bool]:
+    """lo, hi, explicit_hi (True=илт өгөгдлөөс; False=fallback)"""
+    lo = (data.get("tier_floor") or data.get("prev_tier_at") or
+          data.get("min_score") or data.get("tier_min"))
+    hi = (data.get("tier_ceiling") or data.get("next_tier_at") or
+          data.get("max_score") or data.get("tier_max"))
+
+    explicit = hi is not None or lo is not None
+    if hi is None and tier in TIER_BOUNDS:
+        lo, hi = TIER_BOUNDS[tier]
+        explicit = True
+
+    # fallback: progress-ийг заавал харуулъя
+    if hi is None:
+        lo = 0 if lo is None else lo
+        hi = max(score, 0) + DEFAULT_TIER_STEP
+        explicit = False
+
+    try: lo = int(lo) if lo is not None else 0
+    except: lo = 0
+    try: hi = int(hi)
+    except: hi = max(score, 0) + DEFAULT_TIER_STEP
+
+    return lo, hi, explicit
 
 def _shorten(s: str, limit: int) -> str:
     s = (s or "").replace("\n", " ").strip()
@@ -2166,7 +2226,6 @@ async def undo_last_match(interaction: discord.Interaction):
         print("❌ Match буцаах үед алдаа гарлаа:", e)
         await interaction.followup.send("❌ Match буцаах үед алдаа гарлаа.")
 
-# --- /my_score: таны tier • score • weight + score-based progress ---
 @bot.tree.command(name="my_score", description="Таны tier, score, weight-ийг харуулна")
 async def my_score(interaction: discord.Interaction):
     try:
@@ -2245,7 +2304,6 @@ async def my_score(interaction: discord.Interaction):
         ]
         await interaction.followup.send("\n".join(lines))
 
-# --- /user_score: бусдын tier • score • weight + score-based progress (public) ---
 @bot.tree.command(name="user_score", description="Бусад тоглогчийн tier, score, weight-ийг харуулна")
 @app_commands.describe(user="Оноог нь харах discord хэрэглэгч")
 async def user_score(interaction: discord.Interaction, user: discord.Member):
