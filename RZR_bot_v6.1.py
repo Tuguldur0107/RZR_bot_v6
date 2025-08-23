@@ -1013,6 +1013,34 @@ async def _send_with_banner(interaction: discord.Interaction, content: str, *, b
             msg += "\n_(attach_files эрх алга — зураг хавсаргаж чадсангүй)_"
         await sender(content=msg, ephemeral=ephemeral)
 
+TIER_META = {
+    "S": {"color": 0xF59E0B, "emoji": "🏆"},
+    "A": {"color": 0x22C55E, "emoji": "🟢"},
+    "B": {"color": 0x3B82F6, "emoji": "🔵"},
+    "C": {"color": 0x64748B, "emoji": "⚪"},
+    "D": {"color": 0xEF4444, "emoji": "🟥"},
+    "?": {"color": 0x94A3B8, "emoji": "❔"},
+}
+
+def _num(n) -> str:
+    try:
+        return f"{int(n):,}".replace(",", " ")
+    except Exception:
+        return str(n)
+
+def _progress_bar(current: int, lo: int | None, hi: int | None, width: int = 18):
+    if lo is None or hi is None or hi <= lo:
+        return None, 0.0
+    pct = (current - lo) / (hi - lo)
+    pct = max(0.0, min(1.0, pct))
+    filled = int(round(pct * width))
+    return "█" * filled + "░" * (width - filled), pct
+
+def _shorten(s: str, limit: int) -> str:
+    s = (s or "").replace("\n", " ").strip()
+    return s if len(s) <= limit else s[: limit - 1] + "…"
+
+
 KICK_VOTE_THRESHOLD = 10
 
 async def _db_acquire(timeout: float = 2.0):
@@ -2144,7 +2172,7 @@ async def undo_last_match(interaction: discord.Interaction):
 @bot.tree.command(name="my_score", description="Таны оноо болон tier-г харуулна")
 async def my_score(interaction: discord.Interaction):
     try:
-        await interaction.response.defer(thinking=True)  # ⬅️ public response
+        await interaction.response.defer(thinking=True)  # public
     except discord.errors.InteractionResponded:
         return
 
@@ -2152,18 +2180,60 @@ async def my_score(interaction: discord.Interaction):
     data = await get_score(uid)
 
     if not data:
-        await interaction.followup.send("⚠️ Таны оноо бүртгэлгүй байна.")
-        return
+        return await interaction.followup.send("⚠️ Таны оноо бүртгэлгүй байна.")
 
-    tier = data.get("tier", "?")
-    score = data.get("score", 0)
+    tier = str(data.get("tier", "?")).upper()
+    score = int(data.get("score", 0))
     username = data.get("username") or interaction.user.display_name
+    meta = TIER_META.get(tier, TIER_META["?"])
 
-    await interaction.followup.send(
-        f"🏅 {username}:\n"
-        f"Tier: **{tier}**\n"
-        f"Score: **{score}**"
+    # progress-ийн хил (байвал)
+    lo = data.get("tier_floor") or data.get("prev_tier_at") or data.get("min_score") or data.get("tier_min")
+    hi = data.get("tier_ceiling") or data.get("next_tier_at") or data.get("max_score") or data.get("tier_max")
+    try:
+        lo = int(lo) if lo is not None else None
+        hi = int(hi) if hi is not None else None
+    except Exception:
+        lo = lo if isinstance(lo, int) else None
+        hi = hi if isinstance(hi, int) else None
+
+    bar, pct = _progress_bar(score, lo, hi, width=18)
+
+    emb = discord.Embed(
+        title=f"{meta['emoji']} {username}",
+        description="**Таны Tier & Score**",
+        color=meta["color"],
+        timestamp=datetime.now(timezone.utc),
     )
+    emb.set_thumbnail(url=interaction.user.display_avatar.url)
+
+    emb.add_field(name="Tier", value=f"**{tier}**", inline=True)
+    emb.add_field(name="Score", value=f"**{_num(score)}**", inline=True)
+    if "rank" in data:
+        emb.add_field(name="Rank", value=f"#{_num(data['rank'])}", inline=True)
+
+    # Нэмэлт статистик (байвал л харуулна)
+    stats = []
+    if "wins" in data:   stats.append(f"✅ Wins: **{_num(data['wins'])}**")
+    if "losses" in data: stats.append(f"❌ Losses: **{_num(data['losses'])}**")
+    if "games" in data:  stats.append(f"🎮 Games: **{_num(data['games'])}**")
+    if stats:
+        emb.add_field(name="Товч статистик", value="\n".join(stats), inline=False)
+
+    if bar:
+        nxt = f" • next at **{_num(hi)}**" if hi is not None else ""
+        emb.add_field(name="Дараагийн tier хүртэл", value=f"`{bar}`  {int(pct*100)}%{nxt}", inline=False)
+
+    emb.set_footer(text=f"User ID: {uid}")
+
+    try:
+        await interaction.followup.send(embed=emb)
+    except discord.Forbidden:
+        # Сувгийн embed эрхгүй үед fallback текст
+        lines = [f"{meta['emoji']} {username}", f"Tier: {tier}", f"Score: {_num(score)}"]
+        if "rank" in data: lines.append(f"Rank: #{_num(data['rank'])}")
+        if bar: lines.append(f"[{bar}] {int(pct*100)}%")
+        await interaction.followup.send("\n".join(lines))
 
 @bot.tree.command(name="user_score", description="Бусад тоглогчийн оноо болон tier-г харуулна")
 @app_commands.describe(user="Оноог нь харах discord хэрэглэгч")
