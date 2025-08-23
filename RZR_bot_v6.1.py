@@ -1018,11 +1018,11 @@ GET_SCORE_TIMEOUT = 30  # таны утгыг хадгаллаа
 
 # тоон tier-ийг өнгө/emoji bucket руу хөрвүүлэх map
 NUMERIC_TIER_TO_META = {
-    5: "S",
-    4: "A",
+    5: "E",
+    4: "C",
     3: "B",
-    2: "C",
-    1: "E",
+    2: "A",
+    1: "S",
 }
 
 TIER_META = {
