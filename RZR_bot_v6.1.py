@@ -1022,24 +1022,39 @@ TIER_META = {
     "E": {"color": 0xEF4444, "emoji": "🟥"},  # red
 }
 
+NUMERIC_TIER_TO_META = {
+    5: "S",   # 5-x  → S (top)
+    4: "A",   # 4-x  → A
+    3: "B",   # 3-x  → B
+    2: "C",   # 2-x  → C
+    1: "E",   # 1-x  → E (lowest)
+}
+
 DEFAULT_TIER_STEP = 45
 GET_SCORE_TIMEOUT = 30  
 TIER_BOUNDS: dict[str, tuple[int, int]] = {}
 
 def tier_style(tier: str) -> tuple[discord.Color, str]:
-    """Тиерийн өнгө/emoji-г Color төрөл рүү баталгаатай хөрвүүлж өгнө."""
-    meta = (
-        TIER_META.get(tier.upper())
-        or TIER_META.get(tier)
-        or TIER_META["E"]      # fallback: E
-    )
-    c = meta.get("color", 0x5865F2)  # discord blurple as final fallback
-    if isinstance(c, int):
-        colour = discord.Color(c)
-    else:
-        # "#RRGGBB" гэх мэт string ирсэн тохиолдолд:
-        s = str(c).lstrip("#")
-        colour = discord.Color(int(s, 16))
+    """
+    tier: '3-2', '4-1', эсвэл 'S'/'A'... гэх мэт.
+    Буцаах: (discord.Color, emoji)
+    """
+    t = (tier or "").strip().upper()
+
+    # 1) Шууд үсгэн түлхүүр таарах уу?
+    meta = TIER_META.get(t)
+    if not meta:
+        # 2) "N-M" тоон tier бол bucket-луу хөрвүүлнэ
+        m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", t)
+        if m:
+            major = int(m.group(1))
+            key = NUMERIC_TIER_TO_META.get(major, "E")
+            meta = TIER_META.get(key, TIER_META["E"])
+        else:
+            meta = TIER_META["E"]  # эцсийн fallback
+
+    c = meta.get("color", 0x5865F2)  # blurple fallback
+    colour = discord.Color(c if isinstance(c, int) else int(str(c).lstrip("#"), 16))
     return colour, meta.get("emoji", "🔹")
 
 def _clamp(v, lo, hi): 
