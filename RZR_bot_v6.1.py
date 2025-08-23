@@ -698,7 +698,6 @@ async def render_donor_card(member: discord.Member, amount_mnt: int) -> BytesIO:
 
 THANK_LINES = ["Дэмжлэгт тань баярлалаа!",]
 
-
 _FONT_LOGGED = set()
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -1017,31 +1016,69 @@ async def _send_with_banner(interaction: discord.Interaction, content: str, *, b
 
 KICK_VOTE_THRESHOLD = 10
 
+async def _db_acquire(timeout: float = 2.0):
+    """Pool-оос холбоод авч үзнэ; амжихгүй бол шууд connect() фоллбэк."""
+    p = globals().get("pool", None)
+    if p and getattr(p, "acquire", None):
+        try:
+            con = await asyncio.wait_for(p.acquire(), timeout=timeout)
+            return con, True  # from_pool=True
+        except Exception:
+            pass  # pool гацсан/дүүрсэн байж болно
+
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL is not set")
+    con = await asyncpg.connect(url, command_timeout=5)
+    return con, False  # from_pool=False
+
+async def _db_release(con, from_pool: bool):
+    try:
+        if from_pool and globals().get("pool", None):
+            await pool.release(con)
+        else:
+            await con.close()
+    except Exception:
+        pass
+    
 async def _insert_vote_and_count(guild_id: int, target_id: int, voter_id: int, reason: str | None):
-    """Нэг хүний санал оруулах (давхцвал алгасна), дараа нь нийт саналыг тоолж буцаана."""
-    async with pool.acquire() as con, con.transaction():
-        status = await con.execute(
-            """INSERT INTO kick_votes (guild_id, target_id, voter_id, reason)
-               VALUES ($1,$2,$3,$4)
-               ON CONFLICT (guild_id, target_id, voter_id) DO NOTHING""",
-            guild_id, target_id, voter_id, (reason or "")[:240]
+    """
+    Нэг хүний санал оруулаад (давхцвал алгасна), дараа нь
+    тэр target-ийн нийт саналыг НЭГ асуулгаар буцаана (DB round-trip багасна).
+    """
+    async with pool.acquire() as con:
+        row = await con.fetchrow(
+            """
+            WITH ins AS (
+              INSERT INTO kick_votes (guild_id, target_id, voter_id, reason)
+              VALUES ($1,$2,$3,$4)
+              ON CONFLICT (guild_id, target_id, voter_id) DO NOTHING
+              RETURNING 1
+            )
+            SELECT
+              EXISTS(SELECT 1 FROM ins) AS inserted,
+              (SELECT COUNT(*)::int
+                 FROM kick_votes
+                WHERE guild_id=$1 AND target_id=$2) AS count
+            """,
+            guild_id, target_id, voter_id, (reason or "")[:240],
+            timeout=4
         )
-        inserted = status.endswith("1")  # 'INSERT 0 1' эсвэл 'INSERT 0 0'
-        count = await con.fetchval(
-            "SELECT COUNT(*)::int FROM kick_votes WHERE guild_id=$1 AND target_id=$2",
-            guild_id, target_id
-        )
-        return inserted, count
+        return bool(row["inserted"]), int(row["count"])
 
 async def _can_kick(guild: discord.Guild, target: discord.Member) -> tuple[bool, str | None]:
     me = guild.me
-    if target.bot: return False, "Ботыг vote-kick хийхгүй."
-    if guild.owner_id == target.id: return False, "Server owner-ыг kick хийхгүй."
-    if target.guild_permissions.administrator: return False, "Админ эрхтэй хэрэглэгчийг vote-kick хийхгүй."
-    if me.top_role <= target.top_role: return False, "Ботын роль доогуур байна (kick хийх боломжгүй)."
-    if not me.guild_permissions.kick_members: return False, "Ботын **Kick Members** эрх дутуу байна."
+    if target.bot:
+        return False, "Ботыг vote-kick хийхгүй."
+    if guild.owner_id == target.id:
+        return False, "Server owner-ыг kick хийхгүй."
+    if target.guild_permissions.administrator:
+        return False, "Админ эрхтэй хэрэглэгчийг vote-kick хийхгүй."
+    if me.top_role <= target.top_role:
+        return False, "Ботын роль доогуур байна (kick хийх боломжгүй)."
+    if not me.guild_permissions.kick_members:
+        return False, "Ботын **Kick Members** эрх дутуу байна."
     return True, None
-
 # 🧬 Start
 @bot.event
 async def on_ready():
@@ -2781,7 +2818,6 @@ async def diag_dryrun(interaction: discord.Interaction, mode: str = "mock"):
     # 6) Эцсийн тайлан (эпhemeral)
     await interaction.followup.send("🩺 **DRY‑RUN DIAG**\n" + "\n".join(messages), ephemeral=True)
 
-# ---- /kick ----
 @bot.tree.command(name="kick", description="Vote-kick — саналаа өгнө (5 хүрвэл kick)")
 @app_commands.describe(user="Кик саналд оруулах хэрэглэгч", reason="Таны шалтгаан (сонголт)")
 async def kick_cmd(interaction: discord.Interaction, user: discord.Member, reason: str = ""):
@@ -2816,107 +2852,68 @@ async def kick_cmd(interaction: discord.Interaction, user: discord.Member, reaso
     remain = KICK_VOTE_THRESHOLD - count
     await interaction.followup.send(f"{msg} Нийт: **{count}/{KICK_VOTE_THRESHOLD}**. Дутагдаж буй санал: **{remain}**.", ephemeral=True)
 
-# ---- /kick_review (админ) ----
-# ---- /kick_review (админ) ----
-@bot.tree.command(name="kick_review", description="Админ: vote-kick саналуудыг харах")
-@app_commands.default_permissions(administrator=True)
+@bot.tree.command(name="kick", description="Vote-kick — саналаа өгнө (5 хүрвэл kick)")
 @app_commands.describe(
-    user="Зорилтот хэрэглэгчээр шүүх (сонголт)",
-    limit="Жагсаалтын мөрийн тоо (default 15)",
-    public="Нийтэд харагдуулах уу? (default: false)"
+    user="Кик саналд оруулах хэрэглэгч",
+    reason="Таны шалтгаан (сонголт)"
 )
-async def kick_review_cmd(
-    interaction: discord.Interaction,
-    user: discord.Member | None = None,
-    limit: int = 15,
-    public: bool = False,           # ⬅️ нэмлээ
-):
-    eph = not public                 # ⬅️ нэг хувьсагчаар удирдъя
+async def kick_cmd(interaction: discord.Interaction, user: discord.Member, reason: str = ""):
+    await interaction.response.defer(ephemeral=True)
+
+    # Өөрийгөө саналаар хөөхээс хамгаалалт
+    if user.id == interaction.user.id:
+        return await interaction.followup.send("😅 Өөрийгөө vote-kick хийх боломжгүй.", ephemeral=True)
+
+    # Kick боломжтой эсэхийг урьдчилан шалгана
+    ok, why = await _can_kick(interaction.guild, user)
+
+    # Санал оруулах + нийт тоог авах (ачаалал багатай нэг асуулгаар)
     try:
-        await interaction.response.defer(ephemeral=eph)
-    except discord.errors.InteractionResponded:
-        pass
-
-    async with pool.acquire() as con:
-        if user:
-            rows = await con.fetch(
-                """
-                SELECT voter_id,
-                       COALESCE(NULLIF(TRIM(reason), ''), '-') AS reason,
-                       created_at
-                FROM kick_votes
-                WHERE guild_id = $1 AND target_id = $2
-                ORDER BY created_at ASC
-                """,
-                interaction.guild.id, user.id
-            )
-            if not rows:
-                return await interaction.followup.send("📭 Мэдээлэл алга.", ephemeral=eph)
-
-            lines = [f"🧾 {user.mention}-д өгсөн саналууд ({len(rows)}):"]
-            for r in rows:
-                reason = r["reason"]
-                if len(reason) > 120: reason = reason[:117] + "…"
-                lines.append(f"- <@{r['voter_id']}>: {reason}  ({r['created_at']:%Y-%m-%d %H:%M})")
-
-            text = "\n".join(lines)
-            if len(text) > 1900:
-                trimmed = lines[:1] + lines[1:limit+1]
-                extra = len(rows) - min(len(rows), limit)
-                if extra > 0: trimmed.append(f"… (+{extra} мөр)")
-                text = "\n".join(trimmed)
-
-            return await interaction.followup.send(text, ephemeral=eph)
-
-        summary = await con.fetch(
-            """
-            SELECT target_id, COUNT(*)::int AS votes
-            FROM kick_votes
-            WHERE guild_id = $1
-            GROUP BY target_id
-            ORDER BY votes DESC, target_id
-            LIMIT $2
-            """,
-            interaction.guild.id, limit
+        inserted, count = await _insert_vote_and_count(
+            interaction.guild.id, user.id, interaction.user.id, reason
         )
-        if not summary:
-            return await interaction.followup.send("📭 Одоогоор санал алга.", ephemeral=eph)
+    except Exception as e:
+        # DB алдаа гарвал энд илэрхийлээд зогсоочихно
+        return await interaction.followup.send(f"⚠️ DB алдаа: {e}", ephemeral=True)
 
-        DETAILS_PER_TARGET_MAX = 12
-        lines = ["🧾 Хамгийн их санал авсан хэрэглэгчид (санал өгөгч + шалтгаан):"]
+    # Хэрэглэгчид өгөх суурь мессэж
+    base_msg = "🗳 Санал бүртгэгдлээ." if inserted else "📌 Таны санал өмнө бүртгэгдсэн."
 
-        for s in summary:
-            tgt = s["target_id"]; total = s["votes"]
-            lines.append(f"- <@{tgt}> — **{total}** санал")
+    # Хэрэв анхнаасаа kick хийх боломж байхгүй бол (админ, owner, role гэх мэт)
+    if not ok:
+        return await interaction.followup.send(
+            f"{base_msg} Нийт санал: **{count}/{KICK_VOTE_THRESHOLD}**. ⛔ {why}",
+            ephemeral=True
+        )
 
-            details = await con.fetch(
-                """
-                SELECT voter_id,
-                       COALESCE(NULLIF(TRIM(reason), ''), '-') AS reason
-                FROM kick_votes
-                WHERE guild_id = $1 AND target_id = $2
-                ORDER BY created_at ASC
-                LIMIT $3
-                """,
-                interaction.guild.id, tgt, DETAILS_PER_TARGET_MAX
+    # Босго хүрсэн үү?
+    if count >= KICK_VOTE_THRESHOLD:
+        # Кик хийх агшин дээр дахин шалгая (роль/эрх өөрчлөгдсөн байж магад)
+        ok2, why2 = await _can_kick(interaction.guild, user)
+        if not ok2:
+            return await interaction.followup.send(
+                f"{base_msg} Нийт: **{count}/{KICK_VOTE_THRESHOLD}**. ⛔ {why2}",
+                ephemeral=True
+            )
+        try:
+            await user.kick(reason=f"Vote-kick • {count}/{KICK_VOTE_THRESHOLD} vote")
+            return await interaction.followup.send(
+                f"{base_msg} ✅ **{user}** kick хийгдлээ. (Нийт {count}/{KICK_VOTE_THRESHOLD})",
+                ephemeral=True
+            )
+        except Exception as e:
+            return await interaction.followup.send(
+                f"{base_msg} ❌ Kick амжилтгүй: {e}",
+                ephemeral=True
             )
 
-            for d in details:
-                reason = d["reason"]
-                if len(reason) > 100: reason = reason[:97] + "…"
-                lines.append(f"    · <@{d['voter_id']}>: {reason}")
-
-            if total > len(details):
-                lines.append(f"    · … (+{total - len(details)} санал)")
-
-            if sum(len(l)+1 for l in lines) > 1800:
-                lines.append("…"); break
-
-        text = "\n".join(lines)
-        if len(text) > 2000: text = text[:1990] + "…"
-        return await interaction.followup.send(text, ephemeral=eph)
-
-
+    # Одоогоор босго хүрээгүй — үлдгийг харуулна
+    remain = KICK_VOTE_THRESHOLD - count
+    await interaction.followup.send(
+        f"{base_msg} Нийт: **{count}/{KICK_VOTE_THRESHOLD}**. "
+        f"Дутагдаж буй санал: **{remain}**.",
+        ephemeral=True
+    )
 
 # 🎯 Run
 async def main():
