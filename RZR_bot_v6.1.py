@@ -2672,43 +2672,137 @@ async def current_match(interaction: discord.Interaction):
 
 @bot.tree.command(name="leaderboard", description="Топ 10 тоглогчийн оноо, win/loss, winrate харуулна")
 async def leaderboard(interaction: discord.Interaction):
+    # 1) Public defer
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
 
-    all_scores = await get_all_scores()
+    # 2) Оноо/статистик авч сортлоно
+    try:
+        all_scores = await get_all_scores()
+    except Exception as e:
+        return await interaction.followup.send(f"⚠️ Онооны мэдээлэл авахад алдаа: {e}")
+
     if not all_scores:
-        await interaction.followup.send("📭 Онооны мэдээлэл байхгүй байна.")
-        return
+        return await interaction.followup.send("📭 Онооны мэдээлэл байхгүй байна.")
 
-    # 🧮 Tier+score нийлбэрээр эрэмбэлнэ
+    # Tier + Score нийлбэр (таны tier_score helper-ийг ашиглаж байна)
     sorted_data = sorted(all_scores.items(), key=lambda x: tier_score(x[1]), reverse=True)
-    uid_list = [int(uid) for uid, _ in sorted_data[:10]]
+    top = sorted_data[:10]
+    uid_list = [int(uid) for uid, _ in top]
 
-    # 📊 Player stats SQL-оос авахаар тохируулсан
-    stat_rows = await get_player_stats(uid_list)
-    stat_map = {str(row["uid"]): {"wins": row["wins"], "losses": row["losses"]} for row in stat_rows}
+    try:
+        stat_rows = await get_player_stats(uid_list)  # wins, losses-г буцаадаг гэж үзлээ
+    except Exception as e:
+        return await interaction.followup.send(f"⚠️ Статистик авахад алдаа: {e}")
 
-    lines = ["🏅 **Leaderboard** — Top 10 (Tier + Score | 🏆/💀 — Winrate%)"]
-    for i, (uid, data) in enumerate(sorted_data[:10], 1):
-        member = interaction.guild.get_member(int(uid))
-        if not member:
-            continue
+    # uid → {wins, losses}
+    stat_map = {int(row["uid"]): {"wins": row["wins"], "losses": row["losses"]} for row in stat_rows}
 
-        username = data.get("username") or member.display_name
-        tier = data.get("tier", "4-1")
-        score = data.get("score", 0)
+    # 3) Embed бэлдэнэ (дээд байрны tier-ийн өнгөөр)
+    top_tier = (top[0][1].get("tier") if top else "E") or "E"
+    colour, _ = tier_style(str(top_tier))
+    emb = discord.Embed(
+        title="🏅 Leaderboard — Top 10",
+        description="*Tier + Score | 🏆/💀 — Winrate*",
+        colour=colour,
+        timestamp=datetime.now(timezone.utc),
+    )
+    if interaction.guild and interaction.guild.icon:
+        emb.set_thumbnail(url=interaction.guild.icon.url)
+
+    RANK_EMOJI = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+    # 4) Мөр бүрийг гоё форматлана
+    for i, (uid, data) in enumerate(top, 1):
+        uid = int(uid)
+        member = interaction.guild.get_member(uid) if interaction.guild else None
+
+        username = data.get("username") or (member.display_name if member else f"User {uid}")
+        username = _shorten(username, 40)
+
+        tier = str(data.get("tier", "E")).strip()
+        score = int(data.get("score", 0))
+        _, tier_emoji = tier_style(tier)
 
         stat = stat_map.get(uid, {})
-        wins = stat.get("wins", 0)
-        losses = stat.get("losses", 0)
+        wins = int(stat.get("wins", 0))
+        losses = int(stat.get("losses", 0))
         total = wins + losses
-        winrate = (wins / total * 100) if total > 0 else 0.0
+        winrate = (wins / total * 100.0) if total > 0 else 0.0
 
-        lines.append(f"{i}. {tier} | {score:+} — {username} 🏆{wins} / 💀{losses} — {winrate:.1f}%")
+        rank_badge = RANK_EMOJI.get(i, f"#{i}")
+        name = f"{rank_badge} {username}"
+        value = (
+            f"{tier_emoji} **{tier}** • {score:+}  "
+            f"• 🏆{_num(wins)} / 💀{_num(losses)}  "
+            f"• **{winrate:.1f}%**"
+        )
+        emb.add_field(name=name, value=value, inline=False)
 
-    await interaction.followup.send("\n".join(lines))
+    emb.set_footer(text=f"Server: {interaction.guild.name}" if interaction.guild else "Leaderboard")
+
+    # 5) Илгээнэ (embed эрхгүй бол fallback текст)
+    try:
+        await interaction.followup.send(embed=emb)
+    except discord.Forbidden:
+        lines = ["🏅 Leaderboard — Top 10"]
+        for i, (uid, data) in enumerate(top, 1):
+            uid = int(uid)
+            member = interaction.guild.get_member(uid) if interaction.guild else None
+            username = data.get("username") or (member.display_name if member else f"User {uid}")
+            tier = str(data.get("tier", "E")).strip()
+            score = int(data.get("score", 0))
+            stat = stat_map.get(uid, {})
+            wins = int(stat.get("wins", 0)); losses = int(stat.get("losses", 0))
+            total = wins + losses
+            winrate = (wins / total * 100.0) if total > 0 else 0.0
+            lines.append(f"{i}. {tier} | {score:+} — {username}  🏆{_num(wins)} / 💀{_num(losses)} — {winrate:.1f}%")
+        text = "\n".join(lines)
+        await interaction.followup.send(text[:2000])
+
+
+
+# @bot.tree.command(name="leaderboard", description="Топ 10 тоглогчийн оноо, win/loss, winrate харуулна")
+# async def leaderboard(interaction: discord.Interaction):
+#     try:
+#         await interaction.response.defer(thinking=True)
+#     except discord.errors.InteractionResponded:
+#         return
+
+#     all_scores = await get_all_scores()
+#     if not all_scores:
+#         await interaction.followup.send("📭 Онооны мэдээлэл байхгүй байна.")
+#         return
+
+#     # 🧮 Tier+score нийлбэрээр эрэмбэлнэ
+#     sorted_data = sorted(all_scores.items(), key=lambda x: tier_score(x[1]), reverse=True)
+#     uid_list = [int(uid) for uid, _ in sorted_data[:10]]
+
+#     # 📊 Player stats SQL-оос авахаар тохируулсан
+#     stat_rows = await get_player_stats(uid_list)
+#     stat_map = {str(row["uid"]): {"wins": row["wins"], "losses": row["losses"]} for row in stat_rows}
+
+#     lines = ["🏅 **Leaderboard** — Top 10 (Tier + Score | 🏆/💀 — Winrate%)"]
+#     for i, (uid, data) in enumerate(sorted_data[:10], 1):
+#         member = interaction.guild.get_member(int(uid))
+#         if not member:
+#             continue
+
+#         username = data.get("username") or member.display_name
+#         tier = data.get("tier", "4-1")
+#         score = data.get("score", 0)
+
+#         stat = stat_map.get(uid, {})
+#         wins = stat.get("wins", 0)
+#         losses = stat.get("losses", 0)
+#         total = wins + losses
+#         winrate = (wins / total * 100) if total > 0 else 0.0
+
+#         lines.append(f"{i}. {tier} | {score:+} — {username} 🏆{wins} / 💀{losses} — {winrate:.1f}%")
+
+#     await interaction.followup.send("\n".join(lines))
 
 @bot.tree.command(name="match_history", description="Сүүлийн 5 match-ийн мэдээлэл (SQL хувилбар)")
 async def match_history(interaction: discord.Interaction):
