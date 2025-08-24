@@ -2673,49 +2673,51 @@ async def current_match(interaction: discord.Interaction):
 @bot.tree.command(name="leaderboard", description="Топ тоглогчид: tier, score, wins/losses, winrate")
 @app_commands.describe(limit="Хэдийг харуулах вэ (default 10, max 20)")
 async def leaderboard(interaction: discord.Interaction, limit: int = 10):
-    # ---------------- helpers ----------------
     import asyncio
     from datetime import datetime, timezone
+    import discord
 
-    def _short(s: str | None, n: int) -> str:
+    # ---- дотоод туслахууд (энэ командын хүрээнд л хэрэгтэй) ----
+    def _short(s, n: int) -> str:
         s = (str(s) if s is not None else "").strip()
         return s if len(s) <= n else s[: max(0, n - 1)] + "…"
 
     def _to_int(v, default: int = 0) -> int:
         try:
-            if v is None:
-                return default
-            if isinstance(v, (int, bool)):
-                return int(v)
+            if v is None: return default
+            if isinstance(v, (int, bool)): return int(v)
             return int(str(v).strip())
         except Exception:
             return default
 
-    def _num_safe(v) -> str:
-        fn = globals().get("_num")
-        try:
-            return fn(v) if callable(fn) else str(_to_int(v, 0))
-        except Exception:
-            return str(_to_int(v, 0))
-
-    def _winrate(w: int, l: int) -> float:
+    def _calc_winrate(w: int, l: int) -> float:
         t = w + l
         return (w / t * 100.0) if t > 0 else 0.0
 
-    TIMEOUT = globals().get("GET_SCORE_TIMEOUT", 15)
-    RANK_EMOJI = {1: "🥇", 2: "🥈", 3: "🥉"}
+    def _tier_style_safe(tier: str) -> tuple[discord.Color, str]:
+        """tier_style байхгүй/алдаа гарвал blurple + 🔹 рүү унадаг."""
+        ts = globals().get("tier_style")
+        if callable(ts):
+            try:
+                return ts(tier)
+            except Exception:
+                pass
+        return discord.Color(0x5865F2), "🔹"
 
-    # ---------------- start ----------------
+    timeout = globals().get("GET_SCORE_TIMEOUT", 10)
+    limit = max(1, min(limit, 20))
+    RANK_EMOJI = {1: "🥇", 2: "🥈", 3: "🥉"}
+    _num_fn = globals().get("_num")  # байвал 1 000 форматлана
+
+    # ---- 1) defer ----
     try:
         await interaction.response.defer(thinking=True)  # public
     except discord.errors.InteractionResponded:
         return
 
-    limit = max(1, min(limit, 20))
-
-    # 1) Оноо авах
+    # ---- 2) оноо авах ----
     try:
-        all_scores = await asyncio.wait_for(get_all_scores(), timeout=TIMEOUT)
+        all_scores = await asyncio.wait_for(get_all_scores(), timeout=timeout)
     except asyncio.TimeoutError:
         return await interaction.followup.send("⏱️ Онооны мэдээлэл удааширлаа. Дахин оролдоно уу.")
     except Exception as e:
@@ -2724,7 +2726,7 @@ async def leaderboard(interaction: discord.Interaction, limit: int = 10):
     if not all_scores:
         return await interaction.followup.send("📭 Онооны мэдээлэл байхгүй байна.")
 
-    # 2) Эрэмбэлэлт
+    # ---- 3) эрэмбэлэлт ----
     try:
         sorted_data = sorted(all_scores.items(), key=lambda kv: tier_score(kv[1]), reverse=True)
         top = sorted_data[:limit]
@@ -2732,9 +2734,9 @@ async def leaderboard(interaction: discord.Interaction, limit: int = 10):
     except Exception as e:
         return await interaction.followup.send(f"⚠️ Эрэмбэлэх үед алдаа: {e}")
 
-    # 3) Статистик (wins/losses)
+    # ---- 4) статистик ----
     try:
-        stat_rows = await asyncio.wait_for(get_player_stats(uid_list), timeout=TIMEOUT)
+        stat_rows = await asyncio.wait_for(get_player_stats(uid_list), timeout=timeout)
     except asyncio.TimeoutError:
         stat_rows = []
     except Exception as e:
@@ -2744,13 +2746,16 @@ async def leaderboard(interaction: discord.Interaction, limit: int = 10):
     for r in (stat_rows or []):
         try:
             uid = _to_int(r.get("uid"))
-            stat_map[uid] = {"wins": _to_int(r.get("wins")), "losses": _to_int(r.get("losses"))}
+            stat_map[uid] = {
+                "wins": _to_int(r.get("wins"), 0),
+                "losses": _to_int(r.get("losses"), 0),
+            }
         except Exception:
             continue
 
-    # 4) Embed
+    # ---- 5) embed ----
     top_tier = _short((top[0][1].get("tier") if top else "E") or "E", 10)
-    colour, _ = tier_style(top_tier)
+    colour, _ = _tier_style_safe(top_tier)
     emb = discord.Embed(
         title=f"🏅 Leaderboard — Top {len(top)}",
         description="*Tier • +Score • 🏆/💀 • Winrate*",
@@ -2770,29 +2775,30 @@ async def leaderboard(interaction: discord.Interaction, limit: int = 10):
             username = data.get("username") or (member.display_name if member else f"User {uid}")
             username = _short(username, 40)
 
-            tier = _short(str(data.get("tier", "E")).strip(), 10).upper()
+            tier = _short(data.get("tier", "E"), 10).upper()
             score = _to_int(data.get("score"), 0)
 
-            # tier emoji
-            _, tier_emoji = tier_style(tier)
+            # tier emoji/өнгө
+            _, tier_emoji = _tier_style_safe(tier)
 
-            st = stat_map.get(uid, {})
+            st = stat_map.get(uid, {"wins": 0, "losses": 0})
             wins = _to_int(st.get("wins"), 0)
             losses = _to_int(st.get("losses"), 0)
-            winrate = _winrate(wins, losses)
+            winrate = _calc_winrate(wins, losses)
+
+            w_str = _num_fn(wins) if callable(_num_fn) else str(wins)
+            l_str = _num_fn(losses) if callable(_num_fn) else str(losses)
 
             name = f"{RANK_EMOJI.get(i, f'#{i}')} {username}"
             value = (
                 f"{tier_emoji} **{tier}** • {score:+}  "
-                f"• 🏆{_num_safe(wins)} / 💀{_num_safe(losses)}  "
+                f"• 🏆{w_str} / 💀{l_str}  "
                 f"• **{winrate:.1f}%**"
             )
 
             # Discord field лимитүүд
-            if len(name) > 256:
-                name = name[:253] + "…"
-            if len(value) > 1024:
-                value = value[:1021] + "…"
+            if len(name) > 256: name = name[:253] + "…"
+            if len(value) > 1024: value = value[:1021] + "…"
 
             emb.add_field(name=name, value=value, inline=False)
         except Exception as e:
@@ -2802,8 +2808,7 @@ async def leaderboard(interaction: discord.Interaction, limit: int = 10):
     if not emb.fields:
         msg = "⚠️ Жагсаалтыг бүрдүүлэхэд алдаа гарлаа."
         if errors:
-            msg += f" (алдаатай мөр: {len(errors)})"
-            msg += f"\n└─ Эхний алдаа: `{errors[0]}`"
+            msg += f" (алдаатай мөр: {len(errors)})\n└─ {errors[0]}"
         return await interaction.followup.send(msg)
 
     if errors:
@@ -2811,25 +2816,23 @@ async def leaderboard(interaction: discord.Interaction, limit: int = 10):
     else:
         emb.set_footer(text=f"Server: {interaction.guild.name}" if interaction.guild else "Leaderboard")
 
-    # 5) Илгээх (fallback-той)
+    # ---- 6) илгээх (fallback-тэй) ----
     try:
         await interaction.followup.send(embed=emb)
     except discord.Forbidden:
+        # embed эрхгүй сувгийн fallback
         lines = [f"🏅 Leaderboard — Top {len(top)}"]
         for i, (uid_raw, data) in enumerate(top, 1):
             try:
                 uid = _to_int(uid_raw)
                 member = interaction.guild.get_member(uid) if interaction.guild else None
                 username = _short(data.get("username") or (member.display_name if member else f"User {uid}"), 40)
-                tier = _short(str(data.get("tier", "E")).strip(), 10).upper()
+                tier = _short(data.get("tier", "E"), 10).upper()
                 score = _to_int(data.get("score"), 0)
-                st = stat_map.get(uid, {})
+                st = stat_map.get(uid, {"wins": 0, "losses": 0})
                 wins = _to_int(st.get("wins"), 0); losses = _to_int(st.get("losses"), 0)
-                winrate = _winrate(wins, losses)
-                lines.append(
-                    f"{i}. {tier} | {score:+} — {username}  "
-                    f"🏆{_num_safe(wins)} / 💀{_num_safe(losses)} — {winrate:.1f}%"
-                )
+                winrate = _calc_winrate(wins, losses)
+                lines.append(f"{i}. {tier} | {score:+} — {username}  🏆{wins} / 💀{losses} — {winrate:.1f}%")
             except Exception:
                 continue
         await interaction.followup.send("\n".join(lines)[:2000])
