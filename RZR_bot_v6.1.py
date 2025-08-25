@@ -3142,7 +3142,11 @@ async def kick_review_cmd(
         )
         for tgt, data in grouped.items():
             total = data["votes"]
-            name = f"<@{tgt}> — **{total}** санал"
+
+            # --- header мөрийг value-д багтаана (name-д mention хийхгүй) ---
+            header = f"<@{tgt}> — **{total}** санал"
+            # name = f"<@{tgt}> — **{total}** санал"
+
             # Талбарын 1024 тэмдэгт лимитийг баримталж, мөрүүдийг багцалж багтаана
             vals, cur = [], ""
             for voter_id, reason in data["details"]:
@@ -3154,6 +3158,15 @@ async def kick_review_cmd(
                     cur = (cur + "\n" + line) if cur else line
             if cur:
                 vals.append(cur)
+
+                # name-д зүгээр л хоосон толгой эсвэл энгийн текст тавина
+            for i, v in enumerate(vals):
+                emb.add_field(
+                    name="ᅠ" if i else "Target",  # mention-гүй
+                    value=v,
+                    inline=False
+                )
+
             if total > len(data["details"]):
                 extra = total - len(data["details"])
                 tail = f"\n… (+{extra} санал)"
