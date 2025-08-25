@@ -3044,14 +3044,13 @@ async def kick_review_cmd(
     except discord.errors.InteractionResponded:
         pass
 
-    # Хэтэрхий өндөр утга орж ирвэл embed талбарыг давахаас сэргийлж 25-д хавчуулна
+    # max хамгаалалт
     limit = max(1, min(limit, 25))
-    DETAILS_PER_TARGET_MAX = 12  # нэг хэрэглэгчийн дор харуулах дээд мөр
+    DETAILS_PER_TARGET_MAX = 12
 
     con, from_pool = await _db_acquire()
     try:
         if user:
-            # --- Нэг зорилтот хэрэглэгчийн дэлгэрэнгүйг embed-ээр ---
             rows = await con.fetch(
                 """
                 SELECT voter_id,
@@ -3086,10 +3085,9 @@ async def kick_review_cmd(
             try:
                 return await interaction.followup.send(embed=emb, ephemeral=eph)
             except discord.Forbidden:
-                # Embed эрхгүй сувгийн фоллбэк — энгийн текст
                 return await interaction.followup.send("\n".join(lines), ephemeral=eph)
 
-        # --- Хураангуй: топ зорилтууд + санал өгөгчдийн богино жагсаалт (нэг асуулгаар) ---
+        # --- Хураангуй ---
         rows = await con.fetch(
             """
             WITH top_targets AS (
@@ -3125,7 +3123,6 @@ async def kick_review_cmd(
         if not rows:
             return await interaction.followup.send("📭 Одоогоор санал алга.", ephemeral=eph)
 
-        # Group-лох
         grouped: dict[int, dict] = {}
         for r in rows:
             tgt = r["target_id"]; votes = r["votes"]
@@ -3133,52 +3130,41 @@ async def kick_review_cmd(
             if r["voter_id"] is not None:
                 g["details"].append((r["voter_id"], r["reason"]))
 
-        # Embed-үүд: нэг зорилтот = нэг field (уншихад амар)
         emb = discord.Embed(
             title="Vote-kick — Топ зорилтууд",
             description="Хамгийн их санал авсан хэрэглэгчид (санал өгөгч + шалтгаан):",
             color=discord.Color.green(),
             timestamp=datetime.now(timezone.utc),
         )
+
         for tgt, data in grouped.items():
             total = data["votes"]
-
-            # --- header мөрийг value-д багтаана (name-д mention хийхгүй) ---
             header = f"<@{tgt}> — **{total}** санал"
-            # name = f"<@{tgt}> — **{total}** санал"
 
-            # Талбарын 1024 тэмдэгт лимитийг баримталж, мөрүүдийг багцалж багтаана
-            vals, cur = [], ""
+            vals = []
+            cur = header
             for voter_id, reason in data["details"]:
-                line = f"• <@{voter_id}> — {((reason or '-').strip()[:100] + '…') if len((reason or '-').strip()) > 100 else (reason or '-').strip()}"
-                if len(cur) + len(line) + 1 > 1000:
+                short = ((reason or '-').strip()[:100] + '…') if len((reason or '-').strip()) > 100 else (reason or '-').strip()
+                line = f"• <@{voter_id}> — {short}"
+                if len(cur) + 1 + len(line) > 1000:
                     vals.append(cur)
                     cur = line
                 else:
-                    cur = (cur + "\n" + line) if cur else line
+                    cur += "\n" + line
             if cur:
                 vals.append(cur)
 
-                # name-д зүгээр л хоосон толгой эсвэл энгийн текст тавина
-            for i, v in enumerate(vals):
-                emb.add_field(
-                    name="ᅠ" if i else "Target",  # mention-гүй
-                    value=v,
-                    inline=False
-                )
-
-            if total > len(data["details"]):
-                extra = total - len(data["details"])
+            extra = total - len(data["details"])
+            if extra > 0:
                 tail = f"\n… (+{extra} санал)"
                 if len(vals[-1]) + len(tail) <= 1024:
                     vals[-1] += tail
                 else:
                     vals.append(tail)
 
-            # Нэг зорилтод олон мөр багтвал хэд хэдэн field болгон хуваана
             for i, v in enumerate(vals):
                 emb.add_field(
-                    name=name if i == 0 else "ᅠ",  # дараагийн field-д хоосон толгой
+                    name="ᅠ" if i else "Target",
                     value=v,
                     inline=False
                 )
@@ -3187,7 +3173,6 @@ async def kick_review_cmd(
         try:
             return await interaction.followup.send(embed=emb, ephemeral=eph)
         except discord.Forbidden:
-            # Embed эрхгүй сувгийн фоллбэк — нэр + mention хоёрыг хамтад нь
             def _name(uid: int) -> str:
                 m = interaction.guild.get_member(uid)
                 return (m.display_name if m else f"User {uid}")
@@ -3195,7 +3180,6 @@ async def kick_review_cmd(
             lines = ["🧾 Хамгийн их санал авсан хэрэглэгчид:"]
             for tgt, data in grouped.items():
                 tgt_name = _name(tgt)
-                # Жишээ:  Kaguy aaaa!!! II (@mention) — **6** санал
                 lines.append(f"- {tgt_name} (<@{tgt}>) — **{data['votes']}** санал")
                 for voter_id, reason in data["details"]:
                     voter_name = _name(voter_id)
@@ -3208,6 +3192,181 @@ async def kick_review_cmd(
 
     finally:
         await _db_release(con, from_pool)
+
+
+# @bot.tree.command(name="kick_review", description="Админ: vote-kick саналуудыг харах")
+# @app_commands.default_permissions(administrator=True)
+# @app_commands.describe(
+#     user="Зорилтот хэрэглэгчээр шүүх (сонголт)",
+#     limit="Жагсаалтын мөрийн тоо (default 15)",
+#     public="Нийтэд харагдуулах уу? (default: false)"
+# )
+# async def kick_review_cmd(
+#     interaction: discord.Interaction,
+#     user: discord.Member | None = None,
+#     limit: int = 15,
+#     public: bool = False,
+# ):
+#     eph = not public
+#     try:
+#         await interaction.response.defer(ephemeral=eph)
+#     except discord.errors.InteractionResponded:
+#         pass
+
+#     # Хэтэрхий өндөр утга орж ирвэл embed талбарыг давахаас сэргийлж 25-д хавчуулна
+#     limit = max(1, min(limit, 25))
+#     DETAILS_PER_TARGET_MAX = 12  # нэг хэрэглэгчийн дор харуулах дээд мөр
+
+#     con, from_pool = await _db_acquire()
+#     try:
+#         if user:
+#             # --- Нэг зорилтот хэрэглэгчийн дэлгэрэнгүйг embed-ээр ---
+#             rows = await con.fetch(
+#                 """
+#                 SELECT voter_id,
+#                        COALESCE(NULLIF(TRIM(reason), ''), '-') AS reason,
+#                        created_at
+#                 FROM kick_votes
+#                 WHERE guild_id = $1 AND target_id = $2
+#                 ORDER BY created_at ASC
+#                 """,
+#                 interaction.guild.id, user.id,
+#                 timeout=5
+#             )
+#             if not rows:
+#                 return await interaction.followup.send("📭 Мэдээлэл алга.", ephemeral=eph)
+
+#             emb = discord.Embed(
+#                 title=f"Vote-kick — {user.display_name} ({len(rows)} санал)",
+#                 description=f"{user.mention}-д өгсөн саналууд:",
+#                 color=discord.Color.orange(),
+#                 timestamp=datetime.now(timezone.utc),
+#             )
+#             lines = []
+#             for r in rows[:limit]:
+#                 reason = ((r["reason"] or "-").strip()[:120] + "…") if len((r["reason"] or "-").strip()) > 120 else (r["reason"] or "-").strip()
+#                 created = r["created_at"].strftime("%Y-%m-%d %H:%M")
+#                 lines.append(f"• <@{r['voter_id']}> — {reason}  `{created}`")
+#             if len(rows) > limit:
+#                 lines.append(f"… (+{len(rows) - limit} мөр)")
+
+#             emb.add_field(name="Санал өгөгчид", value="\n".join(lines), inline=False)
+#             emb.set_footer(text=f"Сервер: {interaction.guild.name}")
+#             try:
+#                 return await interaction.followup.send(embed=emb, ephemeral=eph)
+#             except discord.Forbidden:
+#                 # Embed эрхгүй сувгийн фоллбэк — энгийн текст
+#                 return await interaction.followup.send("\n".join(lines), ephemeral=eph)
+
+#         # --- Хураангуй: топ зорилтууд + санал өгөгчдийн богино жагсаалт (нэг асуулгаар) ---
+#         rows = await con.fetch(
+#             """
+#             WITH top_targets AS (
+#               SELECT target_id, COUNT(*)::int AS votes
+#               FROM kick_votes
+#               WHERE guild_id = $1
+#               GROUP BY target_id
+#               ORDER BY votes DESC, target_id
+#               LIMIT $2
+#             ),
+#             details AS (
+#               SELECT kv.target_id,
+#                      kv.voter_id,
+#                      COALESCE(NULLIF(TRIM(kv.reason), ''), '-') AS reason,
+#                      kv.created_at,
+#                      ROW_NUMBER() OVER (
+#                        PARTITION BY kv.target_id
+#                        ORDER BY kv.created_at ASC
+#                      ) AS rn
+#               FROM kick_votes kv
+#               JOIN top_targets tt ON tt.target_id = kv.target_id
+#               WHERE kv.guild_id = $1
+#             )
+#             SELECT tt.target_id, tt.votes,
+#                    d.voter_id, d.reason, d.created_at, d.rn
+#             FROM top_targets tt
+#             LEFT JOIN details d ON d.target_id = tt.target_id AND d.rn <= $3
+#             ORDER BY tt.votes DESC, tt.target_id, d.rn ASC
+#             """,
+#             interaction.guild.id, limit, DETAILS_PER_TARGET_MAX,
+#             timeout=6
+#         )
+#         if not rows:
+#             return await interaction.followup.send("📭 Одоогоор санал алга.", ephemeral=eph)
+
+#         # Group-лох
+#         grouped: dict[int, dict] = {}
+#         for r in rows:
+#             tgt = r["target_id"]; votes = r["votes"]
+#             g = grouped.setdefault(tgt, {"votes": votes, "details": []})
+#             if r["voter_id"] is not None:
+#                 g["details"].append((r["voter_id"], r["reason"]))
+
+#         # Embed-үүд: нэг зорилтот = нэг field (уншихад амар)
+#         emb = discord.Embed(
+#             title="Vote-kick — Топ зорилтууд",
+#             description="Хамгийн их санал авсан хэрэглэгчид (санал өгөгч + шалтгаан):",
+#             color=discord.Color.green(),
+#             timestamp=datetime.now(timezone.utc),
+#         )
+#         for tgt, data in grouped.items():
+#             total = data["votes"]
+
+#             name = f"<@{tgt}> — **{total}** санал"
+
+#             # Талбарын 1024 тэмдэгт лимитийг баримталж, мөрүүдийг багцалж багтаана
+#             vals, cur = [], ""
+#             for voter_id, reason in data["details"]:
+#                 line = f"• <@{voter_id}> — {((reason or '-').strip()[:100] + '…') if len((reason or '-').strip()) > 100 else (reason or '-').strip()}"
+#                 if len(cur) + len(line) + 1 > 1000:
+#                     vals.append(cur)
+#                     cur = line
+#                 else:
+#                     cur = (cur + "\n" + line) if cur else line
+#             if cur:
+#                 vals.append(cur)
+
+#             if total > len(data["details"]):
+#                 extra = total - len(data["details"])
+#                 tail = f"\n… (+{extra} санал)"
+#                 if len(vals[-1]) + len(tail) <= 1024:
+#                     vals[-1] += tail
+#                 else:
+#                     vals.append(tail)
+
+#             # Нэг зорилтод олон мөр багтвал хэд хэдэн field болгон хуваана
+#             for i, v in enumerate(vals):
+#                 emb.add_field(
+#                     name=name if i == 0 else "ᅠ",  # дараагийн field-д хоосон толгой
+#                     value=v,
+#                     inline=False
+#                 )
+
+#         emb.set_footer(text=f"Сервер: {interaction.guild.name}")
+#         try:
+#             return await interaction.followup.send(embed=emb, ephemeral=eph)
+#         except discord.Forbidden:
+#             # Embed эрхгүй сувгийн фоллбэк — нэр + mention хоёрыг хамтад нь
+#             def _name(uid: int) -> str:
+#                 m = interaction.guild.get_member(uid)
+#                 return (m.display_name if m else f"User {uid}")
+
+#             lines = ["🧾 Хамгийн их санал авсан хэрэглэгчид:"]
+#             for tgt, data in grouped.items():
+#                 tgt_name = _name(tgt)
+#                 # Жишээ:  Kaguy aaaa!!! II (@mention) — **6** санал
+#                 lines.append(f"- {tgt_name} (<@{tgt}>) — **{data['votes']}** санал")
+#                 for voter_id, reason in data["details"]:
+#                     voter_name = _name(voter_id)
+#                     lines.append(f"    · {voter_name} (<@{voter_id}>): {_shorten(reason, 100)}")
+
+#             text = "\n".join(lines)
+#             if len(text) > 2000:
+#                 text = text[:1990] + "…"
+#             return await interaction.followup.send(text, ephemeral=eph)
+
+#     finally:
+#         await _db_release(con, from_pool)
 
 
 # 🎯 Run
