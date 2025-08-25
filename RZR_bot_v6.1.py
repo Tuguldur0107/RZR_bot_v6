@@ -3162,9 +3162,9 @@ async def kick_review_cmd(
                 else:
                     vals.append(tail)
 
-            for i, v in enumerate(vals):
+            for v in vals:
                 emb.add_field(
-                    name="ᅠ" if i else "Target",
+                    name="\u200B",   # хоосон толгой
                     value=v,
                     inline=False
                 )
