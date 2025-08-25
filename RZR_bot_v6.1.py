@@ -3174,15 +3174,25 @@ async def kick_review_cmd(
         try:
             return await interaction.followup.send(embed=emb, ephemeral=eph)
         except discord.Forbidden:
-            # Embed эрхгүй сувгийн фоллбэк
+            # Embed эрхгүй сувгийн фоллбэк — нэр + mention хоёрыг хамтад нь
+            def _name(uid: int) -> str:
+                m = interaction.guild.get_member(uid)
+                return (m.display_name if m else f"User {uid}")
+
             lines = ["🧾 Хамгийн их санал авсан хэрэглэгчид:"]
             for tgt, data in grouped.items():
-                lines.append(f"- <@{tgt}> — **{data['votes']}** санал")
+                tgt_name = _name(tgt)
+                # Жишээ:  Kaguy aaaa!!! II (@mention) — **6** санал
+                lines.append(f"- {tgt_name} (<@{tgt}>) — **{data['votes']}** санал")
                 for voter_id, reason in data["details"]:
-                    lines.append(f"    · <@{voter_id}>: {_shorten(reason, 100)}")
+                    voter_name = _name(voter_id)
+                    lines.append(f"    · {voter_name} (<@{voter_id}>): {_shorten(reason, 100)}")
+
             text = "\n".join(lines)
-            if len(text) > 2000: text = text[:1990] + "…"
+            if len(text) > 2000:
+                text = text[:1990] + "…"
             return await interaction.followup.send(text, ephemeral=eph)
+
     finally:
         await _db_release(con, from_pool)
 
