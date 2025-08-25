@@ -1134,6 +1134,10 @@ async def _can_kick(guild: discord.Guild, target: discord.Member) -> tuple[bool,
         return False, "Ботын **Kick Members** эрх дутуу байна."
     return True, None
 
+def _shorten(text: str | None, limit: int) -> str:
+    s = (text or "-").strip().replace("\n", " ")
+    return (s[:max(0, limit - 1)] + "…") if len(s) > limit else s
+
 
 # 🧬 Start
 @bot.event
@@ -3142,7 +3146,7 @@ async def kick_review_cmd(
             # Талбарын 1024 тэмдэгт лимитийг баримталж, мөрүүдийг багцалж багтаана
             vals, cur = [], ""
             for voter_id, reason in data["details"]:
-                line = f"• <@{voter_id}> — {_shorten(reason, 100)}"
+                line = f"• <@{voter_id}> — {((reason or '-').strip()[:100] + '…') if len((reason or '-').strip()) > 100 else (reason or '-').strip()}"
                 if len(cur) + len(line) + 1 > 1000:
                     vals.append(cur)
                     cur = line
