@@ -2494,7 +2494,7 @@ class Donor(commands.Cog):
             emb = discord.Embed(
                 title="🎉 Donator Added",
                 description=text,
-                color=0x22C55E
+                color=0xFACC15
             )
             if file:
                 emb.set_image(url="attachment://donator.png")
@@ -2506,12 +2506,14 @@ class Donor(commands.Cog):
             return await interaction.followup.send(text, file=file)
         return await interaction.followup.send(text)
 
+from io import StringIO
+import discord
+
 @bot.tree.command(name="donator_list", description="Donator хэрэглэгчдийн жагсаалт")
 async def donator_list(interaction: discord.Interaction):
     if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message(
-            "❌ Энэ командыг зөвхөн админ хэрэглэгч ашиглаж болно.",
-            ephemeral=True
+            "❌ Энэ командыг зөвхөн админ хэрэглэгч ашиглаж болно.", ephemeral=True
         )
 
     try:
@@ -2523,7 +2525,7 @@ async def donator_list(interaction: discord.Interaction):
 
         scores = await get_all_scores()
 
-        # Donor-уудыг нийт мөнгөөр эрэмбэлэх
+        # Нийт мөнгөөр эрэмбэлэх
         sorted_donors = sorted(
             donors.items(),
             key=lambda x: x[1].get("total_mnt", 0),
@@ -2538,11 +2540,13 @@ async def donator_list(interaction: discord.Interaction):
 
         top_emojis = ["🥇", "🥈", "🥉"]
         total_sum = 0
-        others_text = ""
+
+        other_lines: list[str] = []
 
         for i, (uid, data) in enumerate(sorted_donors, start=1):
             member = interaction.guild.get_member(int(uid))
             if not member:
+                # guild-д байхгүй бол алгасна
                 continue
 
             total = int(data.get("total_mnt", 0))
@@ -2551,27 +2555,144 @@ async def donator_list(interaction: discord.Interaction):
             nick = member.mention
 
             emoji = top_emojis[i-1] if i <= 3 else "✨"
-            value = f"{emoji} **{nick}** (Tier {tier}) — **{total:,}₮**"
+            line = f"{emoji} **{nick}** (Tier {tier}) — **{total:,}₮**"
 
             if i == 1:
-                embed.add_field(name="🏆 Top Donators", value=value, inline=False)
+                embed.add_field(name="🏆 Top Donators", value=line, inline=False)
             elif i <= 3:
-                embed.add_field(name="\u200b", value=value, inline=False)
+                embed.add_field(name="\u200b", value=line, inline=False)
             else:
-                others_text += f"\n{value}"
+                other_lines.append(line)
 
-        # Top 3-с хойшхи бүх доноруудыг нэг field-д оруулах
-        if others_text:
-            embed.add_field(name="Бусад дэмжигчид", value=others_text.strip(), inline=False)
+        # -------- Хэт урт field-ээс хамгаалах: хэсэгчилж нэмнэ --------
+        def chunk_lines(lines: list[str], limit: int = 1024) -> list[str]:
+            """Мөрүүдийг 1024-аас давахгүйгээр бүлэглэнэ."""
+            chunks, buf = [], ""
+            for ln in lines:
+                # +1 нь мөр шилжүүлэх
+                add = ("\n" if buf else "") + ln
+                if len(buf) + len(add) <= limit:
+                    buf += add
+                else:
+                    if buf:
+                        chunks.append(buf)
+                    # Мөр ганцаараа 1024-өөс урт бол хүчээр тасалж оруулна
+                    if len(ln) > limit:
+                        start = 0
+                        while start < len(ln):
+                            chunks.append(ln[start:start+limit])
+                            start += limit
+                        buf = ""
+                    else:
+                        buf = ln
+            if buf:
+                chunks.append(buf)
+            return chunks
+
+        files_to_send = []
+        if other_lines:
+            chunks = chunk_lines(other_lines, 1024)
+
+            # Discord дээд тал нь 25 field. Бидэнд аль хэдийн 3 field орсон.
+            remaining_field_slots = 25 - len(embed.fields)
+            if remaining_field_slots <= 0:
+                # бүх үлдгийг файлд хийнэ
+                all_text = "\n".join(other_lines)
+                fp = StringIO(all_text)
+                files_to_send.append(discord.File(fp, filename="donators.txt"))
+            else:
+                # Олгогдсон slot–оороо field-үүдийг нэмнэ
+                used = 0
+                for idx, ch in enumerate(chunks, start=1):
+                    if used >= remaining_field_slots:
+                        # үлдсэнийг файлд
+                        rest = "\n".join(chunks[idx-1:])
+                        fp = StringIO(rest)
+                        files_to_send.append(discord.File(fp, filename="donators_rest.txt"))
+                        break
+                    name = "Бусад дэмжигчид" if len(chunks) == 1 else f"Бусад дэмжигчид ({idx}/{len(chunks)})"
+                    embed.add_field(name=name, value=ch, inline=False)
+                    used += 1
 
         embed.set_footer(text=f"RZR Bot 🌀 | Дэмжлэгийн нийт дүн: {total_sum:,}₮")
 
-        await interaction.followup.send(embed=embed)
+        if files_to_send:
+            await interaction.followup.send(embed=embed, files=files_to_send)
+        else:
+            await interaction.followup.send(embed=embed)
 
     except Exception as e:
         print("❌ donator_list exception:", e)
         traceback.print_exc()
         await interaction.followup.send("⚠️ Donator жагсаалт авахад алдаа гарлаа.")
+
+
+# @bot.tree.command(name="donator_list", description="Donator хэрэглэгчдийн жагсаалт")
+# async def donator_list(interaction: discord.Interaction):
+#     if not interaction.user.guild_permissions.administrator:
+#         return await interaction.response.send_message(
+#             "❌ Энэ командыг зөвхөн админ хэрэглэгч ашиглаж болно.",
+#             ephemeral=True
+#         )
+
+#     try:
+#         await interaction.response.defer(thinking=True)
+
+#         donors = await get_all_donators()
+#         if not donors:
+#             return await interaction.followup.send("📭 Donator бүртгэл алга байна.")
+
+#         scores = await get_all_scores()
+
+#         # Donor-уудыг нийт мөнгөөр эрэмбэлэх
+#         sorted_donors = sorted(
+#             donors.items(),
+#             key=lambda x: x[1].get("total_mnt", 0),
+#             reverse=True
+#         )
+
+#         embed = discord.Embed(
+#             title="💖 Donators",
+#             description="**Манай server-г хөгжүүлж, дэмжиж буй бүх Donator хэрэглэгчиддээ баярлалаа!** 🎉",
+#             color=0xFFD700
+#         )
+
+#         top_emojis = ["🥇", "🥈", "🥉"]
+#         total_sum = 0
+#         others_text = ""
+
+#         for i, (uid, data) in enumerate(sorted_donors, start=1):
+#             member = interaction.guild.get_member(int(uid))
+#             if not member:
+#                 continue
+
+#             total = int(data.get("total_mnt", 0))
+#             total_sum += total
+#             tier = scores.get(uid, {}).get("tier", "4-1")
+#             nick = member.mention
+
+#             emoji = top_emojis[i-1] if i <= 3 else "✨"
+#             value = f"{emoji} **{nick}** (Tier {tier}) — **{total:,}₮**"
+
+#             if i == 1:
+#                 embed.add_field(name="🏆 Top Donators", value=value, inline=False)
+#             elif i <= 3:
+#                 embed.add_field(name="\u200b", value=value, inline=False)
+#             else:
+#                 others_text += f"\n{value}"
+
+#         # Top 3-с хойшхи бүх доноруудыг нэг field-д оруулах
+#         if others_text:
+#             embed.add_field(name="Бусад дэмжигчид", value=others_text.strip(), inline=False)
+
+#         embed.set_footer(text=f"RZR Bot 🌀 | Дэмжлэгийн нийт дүн: {total_sum:,}₮")
+
+#         await interaction.followup.send(embed=embed)
+
+#     except Exception as e:
+#         print("❌ donator_list exception:", e)
+#         traceback.print_exc()
+#         await interaction.followup.send("⚠️ Donator жагсаалт авахад алдаа гарлаа.")
 
 @bot.tree.command(name="help_info", description="Bot-ын танилцуулга (readme.md файлыг харуулна)")
 async def help_info(interaction: discord.Interaction):
