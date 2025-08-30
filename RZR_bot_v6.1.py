@@ -2384,62 +2384,164 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
     points="Нэмэх оноо (default: 1)"
 )
 async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
+    # 1) Permission check
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэнэ.", ephemeral=True)
         return
 
+    # 2) Defer
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
 
-    user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
-
+    # 3) Parse mentions -> user_ids
+    user_ids = [
+        int(word[2:-1].replace("!", ""))
+        for word in mentions.split()
+        if word.startswith("<@") and word.endswith(">")
+    ]
     if not user_ids:
         await interaction.followup.send("⚠️ Хэрэглэгчийн mention оруулна уу.")
         return
 
-    updated = []
+    updated_ids: list[int] = []
+    lines: list[str] = []
 
     for uid in user_ids:
         member = interaction.guild.get_member(uid)
         if not member:
             continue
 
+        # ---- read current ----
         data = await get_score(uid) or get_default_tier()
+        old_username = data.get("username") or member.display_name
+        old_score = int(data.get("score") or 0)
+        old_tier = str(data.get("tier") or "E").strip()
+
+        # үр дүн бодох (үлдэгдлийг зөв авч үлдээнэ)
+        new_score = old_score + int(points)
+        new_tier = old_tier
+
+        promotions: list[str] = []  # ["E→D", "D→C", ...] эсвэл ["C→B", "B→A"]
+        demotions: list[str] = []   # ["C→D", "D→E", ...]
+        direction_emoji = "➕" if points >= 0 else "➖"
+
+        # + талын алхам: 5 оноо тутамд ахилт
+        while new_score >= 5:
+            prev_tier = new_tier
+            new_tier = promote_tier(new_tier)    # таны бэлэн функц
+            promotions.append(f"{prev_tier}→{new_tier}")
+            new_score -= 5                        # 5 оноог “зарцуулж” үлдэгдэл үлдээнэ
+
+        # - талын алхам: -5 тутамд бууралт
+        while new_score <= -5:
+            prev_tier = new_tier
+            new_tier = demote_tier(new_tier)     # таны бэлэн функц
+            demotions.append(f"{prev_tier}→{new_tier}")
+            new_score += 5                        # -5-ыг нөхөж үлдэгдэл гаргана
+
+        # ---- persist ----
         data["username"] = member.display_name
-        data["score"] += points
+        data["score"] = new_score
+        data["tier"] = new_tier
+        await upsert_score(uid, new_score, new_tier, data["username"])
+        updated_ids.append(uid)
 
-        score = data["score"]
-        tier = data["tier"]
+        # ---- display line ----
+        # Жишээ: @User: ➕12 | Score 3→2 | Tier: E→D→C (2x up)
+        score_part = f"Score {old_score}→{new_score}"
+        tier_part = ""
+        if promotions:
+            tier_part = " | Tier: " + "→".join(promotions) + f" ({len(promotions)}x up)"
+        elif demotions:
+            tier_part = " | Tier: " + "→".join(demotions) + f" ({len(demotions)}x down)"
+        else:
+            if old_tier != new_tier:
+                tier_part = f" | Tier: {old_tier}→{new_tier}"
+            else:
+                tier_part = f" | Tier: {new_tier}"
 
-        while score >= 5:
-            tier = promote_tier(tier)
-            score = 0
-        while score <= -5:
-            tier = demote_tier(tier)
-            score = 0
+        lines.append(
+            f"<@{uid}>: {direction_emoji}{points} | {score_part}{tier_part}"
+        )
 
-        data["score"] = score
-        data["tier"] = tier
+    # nickname update (optional guard)
+    if updated_ids:
+        try:
+            await update_nicknames_for_users(interaction.guild, updated_ids)
+        except Exception as e:
+            print("⚠️ nickname update error:", e)
 
-        await upsert_score(uid, score, tier, data["username"])
-        updated.append(uid)
+    if not lines:
+        await interaction.followup.send("⚠️ Шинэчлэгдсэн хэрэглэгч алга.")
+        return
 
-    try:
-        await update_nicknames_for_users(interaction.guild, updated)
-    except Exception as e:
-        print("⚠️ nickname update error:", e)
-
-    mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
-    lines = []
-    for uid in updated:
-        data = await get_score(uid)
-        if not data:
-            continue
-        lines.append(f"<@{uid}>: {data['score']} (Tier: {data['tier']})")
-
+    # Нэгтгэсэн хариу
     await interaction.followup.send("✅ Оноо шинэчлэгдлээ:\n" + "\n".join(lines))
+
+# @bot.tree.command(name="add_score", description="Тест: оноо нэмэх")
+# @app_commands.describe(
+#     mentions="@mention хэлбэрээр заана",
+#     points="Нэмэх оноо (default: 1)"
+# )
+# async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
+#     if not interaction.user.guild_permissions.administrator:
+#         await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэнэ.", ephemeral=True)
+#         return
+
+#     try:
+#         await interaction.response.defer(thinking=True)
+#     except discord.errors.InteractionResponded:
+#         return
+
+#     user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
+
+#     if not user_ids:
+#         await interaction.followup.send("⚠️ Хэрэглэгчийн mention оруулна уу.")
+#         return
+
+#     updated = []
+
+#     for uid in user_ids:
+#         member = interaction.guild.get_member(uid)
+#         if not member:
+#             continue
+
+#         data = await get_score(uid) or get_default_tier()
+#         data["username"] = member.display_name
+#         data["score"] += points
+
+#         score = data["score"]
+#         tier = data["tier"]
+
+#         while score >= 5:
+#             tier = promote_tier(tier)
+#             score = 0
+#         while score <= -5:
+#             tier = demote_tier(tier)
+#             score = 0
+
+#         data["score"] = score
+#         data["tier"] = tier
+
+#         await upsert_score(uid, score, tier, data["username"])
+#         updated.append(uid)
+
+#     try:
+#         await update_nicknames_for_users(interaction.guild, updated)
+#     except Exception as e:
+#         print("⚠️ nickname update error:", e)
+
+#     mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
+#     lines = []
+#     for uid in updated:
+#         data = await get_score(uid)
+#         if not data:
+#             continue
+#         lines.append(f"<@{uid}>: {data['score']} (Tier: {data['tier']})")
+
+#     await interaction.followup.send("✅ Оноо шинэчлэгдлээ:\n" + "\n".join(lines))
 class Donor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -2625,74 +2727,6 @@ async def donator_list(interaction: discord.Interaction):
         print("❌ donator_list exception:", e)
         traceback.print_exc()
         await interaction.followup.send("⚠️ Donator жагсаалт авахад алдаа гарлаа.")
-
-
-# @bot.tree.command(name="donator_list", description="Donator хэрэглэгчдийн жагсаалт")
-# async def donator_list(interaction: discord.Interaction):
-#     if not interaction.user.guild_permissions.administrator:
-#         return await interaction.response.send_message(
-#             "❌ Энэ командыг зөвхөн админ хэрэглэгч ашиглаж болно.",
-#             ephemeral=True
-#         )
-
-#     try:
-#         await interaction.response.defer(thinking=True)
-
-#         donors = await get_all_donators()
-#         if not donors:
-#             return await interaction.followup.send("📭 Donator бүртгэл алга байна.")
-
-#         scores = await get_all_scores()
-
-#         # Donor-уудыг нийт мөнгөөр эрэмбэлэх
-#         sorted_donors = sorted(
-#             donors.items(),
-#             key=lambda x: x[1].get("total_mnt", 0),
-#             reverse=True
-#         )
-
-#         embed = discord.Embed(
-#             title="💖 Donators",
-#             description="**Манай server-г хөгжүүлж, дэмжиж буй бүх Donator хэрэглэгчиддээ баярлалаа!** 🎉",
-#             color=0xFFD700
-#         )
-
-#         top_emojis = ["🥇", "🥈", "🥉"]
-#         total_sum = 0
-#         others_text = ""
-
-#         for i, (uid, data) in enumerate(sorted_donors, start=1):
-#             member = interaction.guild.get_member(int(uid))
-#             if not member:
-#                 continue
-
-#             total = int(data.get("total_mnt", 0))
-#             total_sum += total
-#             tier = scores.get(uid, {}).get("tier", "4-1")
-#             nick = member.mention
-
-#             emoji = top_emojis[i-1] if i <= 3 else "✨"
-#             value = f"{emoji} **{nick}** (Tier {tier}) — **{total:,}₮**"
-
-#             if i == 1:
-#                 embed.add_field(name="🏆 Top Donators", value=value, inline=False)
-#             elif i <= 3:
-#                 embed.add_field(name="\u200b", value=value, inline=False)
-#             else:
-#                 others_text += f"\n{value}"
-
-#         # Top 3-с хойшхи бүх доноруудыг нэг field-д оруулах
-#         if others_text:
-#             embed.add_field(name="Бусад дэмжигчид", value=others_text.strip(), inline=False)
-
-#         embed.set_footer(text=f"RZR Bot 🌀 | Дэмжлэгийн нийт дүн: {total_sum:,}₮")
-
-#         await interaction.followup.send(embed=embed)
-
-#     except Exception as e:
-#         print("❌ donator_list exception:", e)
-#         traceback.print_exc()
-#         await interaction.followup.send("⚠️ Donator жагсаалт авахад алдаа гарлаа.")
 
 @bot.tree.command(name="help_info", description="Bot-ын танилцуулга (readme.md файлыг харуулна)")
 async def help_info(interaction: discord.Interaction):
