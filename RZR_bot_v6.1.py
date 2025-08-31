@@ -2480,68 +2480,6 @@ async def add_score(interaction: discord.Interaction, mentions: str, points: int
     # Нэгтгэсэн хариу
     await interaction.followup.send("✅ Оноо шинэчлэгдлээ:\n" + "\n".join(lines))
 
-# @bot.tree.command(name="add_score", description="Тест: оноо нэмэх")
-# @app_commands.describe(
-#     mentions="@mention хэлбэрээр заана",
-#     points="Нэмэх оноо (default: 1)"
-# )
-# async def add_score(interaction: discord.Interaction, mentions: str, points: int = 1):
-#     if not interaction.user.guild_permissions.administrator:
-#         await interaction.response.send_message("⛔️ Зөвхөн админ хэрэглэнэ.", ephemeral=True)
-#         return
-
-#     try:
-#         await interaction.response.defer(thinking=True)
-#     except discord.errors.InteractionResponded:
-#         return
-
-#     user_ids = [int(word[2:-1].replace("!", "")) for word in mentions.split() if word.startswith("<@") and word.endswith(">")]
-
-#     if not user_ids:
-#         await interaction.followup.send("⚠️ Хэрэглэгчийн mention оруулна уу.")
-#         return
-
-#     updated = []
-
-#     for uid in user_ids:
-#         member = interaction.guild.get_member(uid)
-#         if not member:
-#             continue
-
-#         data = await get_score(uid) or get_default_tier()
-#         data["username"] = member.display_name
-#         data["score"] += points
-
-#         score = data["score"]
-#         tier = data["tier"]
-
-#         while score >= 5:
-#             tier = promote_tier(tier)
-#             score = 0
-#         while score <= -5:
-#             tier = demote_tier(tier)
-#             score = 0
-
-#         data["score"] = score
-#         data["tier"] = tier
-
-#         await upsert_score(uid, score, tier, data["username"])
-#         updated.append(uid)
-
-#     try:
-#         await update_nicknames_for_users(interaction.guild, updated)
-#     except Exception as e:
-#         print("⚠️ nickname update error:", e)
-
-#     mentions_text = ", ".join(f"<@{uid}>" for uid in updated)
-#     lines = []
-#     for uid in updated:
-#         data = await get_score(uid)
-#         if not data:
-#             continue
-#         lines.append(f"<@{uid}>: {data['score']} (Tier: {data['tier']})")
-
-#     await interaction.followup.send("✅ Оноо шинэчлэгдлээ:\n" + "\n".join(lines))
 class Donor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
