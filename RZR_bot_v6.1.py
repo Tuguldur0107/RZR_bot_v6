@@ -943,7 +943,7 @@ async def send_team_assignment_embed(
         ranked_badge = " • 🏅 Ranked" if ranked else " • ⚠️ Unranked"
 
     emb = discord.Embed(
-        title=f"🤝 {title_prefix} — Team Assignment",
+        title=f"🤝 {title_prefix} — Багуудын хувиарлалт",
         description=f"Strategy: {strategy_note} • diff: `{diff}`{ranked_badge}\n"
                     f"Setup: **{team_count} × {players_per_team}**",
         color=0x2ECC71 if title_prefix.lower() == "bot" else 0x5865F2
@@ -990,7 +990,7 @@ async def send_team_assignment_embed(
             else:
                 lo_ids.append(int(x))
         lo_text = "• " + "\n• ".join(f"<@{u}>" for u in lo_ids)
-        emb.add_field(name="⚠️ This round not included", value=lo_text, inline=False)
+        emb.add_field(name="⚠️ Багтаагүй азгүй тахиа", value=lo_text, inline=False)
 
     await interaction.followup.send(embed=emb)
 
