@@ -3285,65 +3285,69 @@ async def kick_review_cmd(
         await _db_release(con, from_pool)
 
 
-# intents = discord.Intents.default()
-# client = discord.Client(intents=intents)
-# tree = app_commands.CommandTree(client) 
-# intents.message_content = True
+intents = discord.Intents.default()
+client = discord.Client(intents=intents)
+tree = app_commands.CommandTree(client) 
+intents.message_content = True
 
-# @tree.command(name="matchups", description="Идэвхтэй session-ийн багуудыг санамсаргүй хослуулж харуулна")
-# @app_commands.describe(seed="Санамсаргүй үүсгэгчийн үр үсэг (option) — тогтмол дахин гаргахад)")
-# async def fixtures(interaction: discord.Interaction, seed: Optional[int] = None):
-#     await interaction.response.defer(thinking=True)
+@bot.tree.command(name="matchups", description="Хуваарилагдсан багуудыг санамсаргүй хослуулж харуулна")
+@app_commands.describe(seed="Санамсаргүй сугалааны үр (optional) — ижил үр өгвөл адил хослол гарна")
+async def matchups(interaction: discord.Interaction, seed: Optional[int] = None):
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.errors.InteractionResponded:
+        pass
 
-#     # 1) Идэвхтэй session тодорхойлох
-#     guild_id = interaction.guild_id
-#     session = db.get_active_session(guild_id)  # <- танай database.py-д байгаа helper-ийг ашигла
-#     if not session:
-#         return await interaction.followup.send("⚠️ Идэвхтэй session алга. Эхлээд `/start_match` ажиллуулна уу.", ephemeral=True)
+    # 1) Идэвхтэй session унших
+    session = await load_session_state()
+    if not session or not session.get("active"):
+        return await interaction.followup.send("⚠️ Одоогоор идэвхтэй session алга. Эхлээд `/start_match` хийнэ үү.", ephemeral=True)
 
-#     # 2) Одоогийн багуудыг авах (доорх db helper-ийг 2-р хэсэгт нэмнэ)
-#     teams = db.get_current_teams(session_id=session.id)  # List[{"team_no": int, "members": [str, ...]}]
-#     if not teams or len(teams) < 2:
-#         return await interaction.followup.send("⚠️ Хамгийн багадаа 2 баг шаардлагатай. `/go_bot` эсвэл `/go_gpt` ашиглан баг хуваарилаарай.", ephemeral=True)
+    teams = session.get("teams") or []
+    if not teams or len([t for t in teams if t]) < 2:
+        return await interaction.followup.send("⚠️ Хамгийн багадаа 2 баг хэрэгтэй. `/go_bot` эсвэл `/go_gpt` ашиглан баг хуваарилаарай.", ephemeral=True)
 
-#     # 3) Санамсаргүй хослуулах
-#     rng = random.Random(seed) if seed is not None else random
-#     team_ids = [t["team_no"] for t in teams]
-#     rng.shuffle(team_ids)
+    # 2) Багийн индексүүдийг санамсаргүй үсчүүлэх
+    rng = random.Random(seed) if seed is not None else random
+    team_ids = [i + 1 for i, t in enumerate(teams) if t]  # 1-base дугаар
+    rng.shuffle(team_ids)
 
-#     pairs = []
-#     for i in range(0, len(team_ids) - 1, 2):
-#         pairs.append((team_ids[i], team_ids[i + 1]))
+    pairs = [(team_ids[i], team_ids[i+1]) for i in range(0, len(team_ids) - 1, 2)]
+    bye_team = team_ids[-1] if len(team_ids) % 2 == 1 else None
 
-#     bye_team = team_ids[-1] if len(team_ids) % 2 == 1 else None
+    # 3) Гишүүдийн нэрийг бэлдэх
+    guild = interaction.guild
+    def team_members_str(idx_1based: int) -> str:
+        idx0 = idx_1based - 1
+        uids = teams[idx0]
+        names = []
+        for uid in uids:
+            m = guild.get_member(uid)
+            names.append(m.mention if m else f"`{uid}`")
+        return ", ".join(names) if names else "—"
 
-#     # 4) Харагдах Embed
-#     emb = discord.Embed(
-#         title="🎲 Random Fixtures",
-#         description=f"Session **#{session.id}** — багуудыг санамсаргүй хослууллаа.",
-#         color=0x00B2FF
-#     )
-#     for a, b in pairs:
-#         a_members = next((t["members"] for t in teams if t["team_no"] == a), [])
-#         b_members = next((t["members"] for t in teams if t["team_no"] == b), [])
-#         emb.add_field(
-#             name=f"⚔️ Team {a} vs Team {b}",
-#             value=f"**Team {a}**: {', '.join(a_members) or '—'}\n**Team {b}**: {', '.join(b_members) or '—'}",
-#             inline=False
-#         )
+    # 4) Embed
+    emb = discord.Embed(
+        title="🎲 Random Matchups",
+        description="Хэн хэнтэй тоглохыг санамсаргүй хослууллаа.",
+        color=0x00B2FF
+    )
+    for a, b in pairs:
+        emb.add_field(
+            name=f"⚔️ Team {a} vs Team {b}",
+            value=f"**Team {a}**: {team_members_str(a)}\n**Team {b}**: {team_members_str(b)}",
+            inline=False
+        )
 
-#     if bye_team is not None:
-#         bye_members = next((t["members"] for t in teams if t["team_no"] == bye_team), [])
-#         emb.add_field(
-#             name="🕐 Bye",
-#             value=f"**Team {bye_team}** (амарна): {', '.join(bye_members) or '—'}",
-#             inline=False
-#         )
+    if bye_team is not None:
+        emb.add_field(
+            name="🕐 Bye (тэнцүү биш үед)",
+            value=f"**Team {bye_team}** амарна: {team_members_str(bye_team)}",
+            inline=False
+        )
 
-#     footer = "Seed: {}".format(seed) if seed is not None else "Seed хэрэглээгүй"
-#     emb.set_footer(text=footer)
-
-#     await interaction.followup.send(embed=emb)
+    emb.set_footer(text=("Seed: {}".format(seed) if seed is not None else "Seed хэрэглээгүй"))
+    await interaction.followup.send(embed=emb)
 
 
 # 🎯 Run
