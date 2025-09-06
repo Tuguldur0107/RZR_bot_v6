@@ -16,13 +16,12 @@ import asyncpg
 import openai
 import traceback
 from asyncio import sleep
-from typing import List, Dict
+from typing import List, Dict, Optional
 import math, random, os, PIL
 from typing import Dict, List
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageFont, ImageChops, __file__ as PIL_FILE
 from io import BytesIO
-
 
 # 🗄️ Local modules
 from database import (
@@ -3284,6 +3283,62 @@ async def kick_review_cmd(
 
     finally:
         await _db_release(con, from_pool)
+
+@tree.command(name="matchups", description="Идэвхтэй session-ийн багуудыг санамсаргүй хослуулж харуулна")
+@app_commands.describe(seed="Санамсаргүй үүсгэгчийн үр үсэг (option) — тогтмол дахин гаргахад)")
+async def fixtures(interaction: discord.Interaction, seed: Optional[int] = None):
+    await interaction.response.defer(thinking=True)
+
+    # 1) Идэвхтэй session тодорхойлох
+    guild_id = interaction.guild_id
+    session = db.get_active_session(guild_id)  # <- танай database.py-д байгаа helper-ийг ашигла
+    if not session:
+        return await interaction.followup.send("⚠️ Идэвхтэй session алга. Эхлээд `/start_match` ажиллуулна уу.", ephemeral=True)
+
+    # 2) Одоогийн багуудыг авах (доорх db helper-ийг 2-р хэсэгт нэмнэ)
+    teams = db.get_current_teams(session_id=session.id)  # List[{"team_no": int, "members": [str, ...]}]
+    if not teams or len(teams) < 2:
+        return await interaction.followup.send("⚠️ Хамгийн багадаа 2 баг шаардлагатай. `/go_bot` эсвэл `/go_gpt` ашиглан баг хуваарилаарай.", ephemeral=True)
+
+    # 3) Санамсаргүй хослуулах
+    rng = random.Random(seed) if seed is not None else random
+    team_ids = [t["team_no"] for t in teams]
+    rng.shuffle(team_ids)
+
+    pairs = []
+    for i in range(0, len(team_ids) - 1, 2):
+        pairs.append((team_ids[i], team_ids[i + 1]))
+
+    bye_team = team_ids[-1] if len(team_ids) % 2 == 1 else None
+
+    # 4) Харагдах Embed
+    emb = discord.Embed(
+        title="🎲 Random Fixtures",
+        description=f"Session **#{session.id}** — багуудыг санамсаргүй хослууллаа.",
+        color=0x00B2FF
+    )
+    for a, b in pairs:
+        a_members = next((t["members"] for t in teams if t["team_no"] == a), [])
+        b_members = next((t["members"] for t in teams if t["team_no"] == b), [])
+        emb.add_field(
+            name=f"⚔️ Team {a} vs Team {b}",
+            value=f"**Team {a}**: {', '.join(a_members) or '—'}\n**Team {b}**: {', '.join(b_members) or '—'}",
+            inline=False
+        )
+
+    if bye_team is not None:
+        bye_members = next((t["members"] for t in teams if t["team_no"] == bye_team), [])
+        emb.add_field(
+            name="🕐 Bye",
+            value=f"**Team {bye_team}** (амарна): {', '.join(bye_members) or '—'}",
+            inline=False
+        )
+
+    footer = "Seed: {}".format(seed) if seed is not None else "Seed хэрэглээгүй"
+    emb.set_footer(text=footer)
+
+    await interaction.followup.send(embed=emb)
+
 
 # 🎯 Run
 async def main():
