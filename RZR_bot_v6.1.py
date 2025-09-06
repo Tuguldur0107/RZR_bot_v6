@@ -3289,7 +3289,6 @@ intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client) 
 intents.message_content = True
-
 @bot.tree.command(name="matchups", description="Хуваарилагдсан багуудыг санамсаргүй хослуулна (Scourge vs Sentinel)")
 @app_commands.describe(seed="Санамсаргүй сугалааны үр (optional)")
 async def matchups(interaction: discord.Interaction, seed: Optional[int] = None):
@@ -3314,13 +3313,17 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
     bye_team = team_ids[-1] if len(team_ids) % 2 == 1 else None
 
     guild = interaction.guild
-    def team_members_str(idx_1based: int) -> str:
+    all_scores = await get_all_scores()
+
+    def team_leader_str(idx_1based: int) -> str:
         idx0 = idx_1based - 1
         uids = teams[idx0]
-        return ", ".join(
-            guild.get_member(uid).mention if guild.get_member(uid) else f"`{uid}`"
-            for uid in uids
-        ) or "—"
+        if not uids:
+            return "—"
+        # жингээр хамгийн өндөр гишүүн = leader
+        best_uid = max(uids, key=lambda uid: tier_score(all_scores.get(str(uid), {})))
+        member = guild.get_member(best_uid)
+        return member.mention if member else f"`{best_uid}`"
 
     emb = discord.Embed(
         title="🎲 Matchups — Random Pairings",
@@ -3331,21 +3334,20 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
     for i, (a, b) in enumerate(pairs, start=1):
         emb.add_field(
             name=f"⚔️ Game {i}",
-            value=f"💀 **Scourge (Team {a})**: {team_members_str(a)}\n"
-                  f"🌿 **Sentinel (Team {b})**: {team_members_str(b)}",
+            value=f"💀 **Scourge (Team {a}) Leader**: {team_leader_str(a)}\n"
+                  f"🌿 **Sentinel (Team {b}) Leader**: {team_leader_str(b)}",
             inline=False
         )
 
     if bye_team is not None:
         emb.add_field(
             name="🕐 Bye",
-            value=f"**Team {bye_team}** амарна: {team_members_str(bye_team)}",
+            value=f"**Team {bye_team}** Leader: {team_leader_str(bye_team)}",
             inline=False
         )
 
     emb.set_footer(text=("Seed: {}".format(seed) if seed is not None else "Random every time"))
     await interaction.followup.send(embed=emb)
-
 
 
 # 🎯 Run
