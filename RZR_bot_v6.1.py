@@ -2674,8 +2674,8 @@ async def help_info(interaction: discord.Interaction):
         await interaction.response.send_message("⚠️ `Readme.md` файл олдсонгүй.", ephemeral=True)
         return
 
-    if len(content) > 1900:
-        content = content[:1900] + "\n...\n(үргэлжлэлтэй)"
+    if len(content) > 3000:
+        content = content[:3000] + "\n...\n(үргэлжлэлтэй)"
 
     await interaction.response.send_message(
         f"📘 **RZR Bot Танилцуулга**\n```markdown\n{content}\n```",
@@ -2691,8 +2691,8 @@ async def help_commands(interaction: discord.Interaction):
         await interaction.response.send_message("⚠️ `Commands_alt.md` файл олдсонгүй.", ephemeral=True)
         return
 
-    if len(content) > 1900:
-        content = content[:1900] + "\n...\n(үргэлжлэлтэй)"
+    if len(content) > 3000:
+        content = content[:3000] + "\n...\n(үргэлжлэлтэй)"
 
     await interaction.response.send_message(
         f"📒 **RZR Bot Коммандууд**\n```markdown\n{content}\n```",
