@@ -3290,64 +3290,62 @@ client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client) 
 intents.message_content = True
 
-@bot.tree.command(name="matchups", description="Хуваарилагдсан багуудыг санамсаргүй хослуулж харуулна")
-@app_commands.describe(seed="Санамсаргүй сугалааны үр (optional) — ижил үр өгвөл адил хослол гарна")
+@bot.tree.command(name="matchups", description="Хуваарилагдсан багуудыг санамсаргүй хослуулна (Scourge vs Sentinel)")
+@app_commands.describe(seed="Санамсаргүй сугалааны үр (optional)")
 async def matchups(interaction: discord.Interaction, seed: Optional[int] = None):
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         pass
 
-    # 1) Идэвхтэй session унших
     session = await load_session_state()
     if not session or not session.get("active"):
-        return await interaction.followup.send("⚠️ Одоогоор идэвхтэй session алга. Эхлээд `/start_match` хийнэ үү.", ephemeral=True)
+        return await interaction.followup.send("⚠️ Session идэвхгүй байна.", ephemeral=True)
 
     teams = session.get("teams") or []
     if not teams or len([t for t in teams if t]) < 2:
-        return await interaction.followup.send("⚠️ Хамгийн багадаа 2 баг хэрэгтэй. `/go_bot` эсвэл `/go_gpt` ашиглан баг хуваарилаарай.", ephemeral=True)
+        return await interaction.followup.send("⚠️ Хамгийн багадаа 2 баг хэрэгтэй.", ephemeral=True)
 
-    # 2) Багийн индексүүдийг санамсаргүй үсчүүлэх
     rng = random.Random(seed) if seed is not None else random
-    team_ids = [i + 1 for i, t in enumerate(teams) if t]  # 1-base дугаар
+    team_ids = [i + 1 for i, t in enumerate(teams) if t]
     rng.shuffle(team_ids)
 
-    pairs = [(team_ids[i], team_ids[i+1]) for i in range(0, len(team_ids) - 1, 2)]
+    pairs = [(team_ids[i], team_ids[i + 1]) for i in range(0, len(team_ids) - 1, 2)]
     bye_team = team_ids[-1] if len(team_ids) % 2 == 1 else None
 
-    # 3) Гишүүдийн нэрийг бэлдэх
     guild = interaction.guild
     def team_members_str(idx_1based: int) -> str:
         idx0 = idx_1based - 1
         uids = teams[idx0]
-        names = []
-        for uid in uids:
-            m = guild.get_member(uid)
-            names.append(m.mention if m else f"`{uid}`")
-        return ", ".join(names) if names else "—"
+        return ", ".join(
+            guild.get_member(uid).mention if guild.get_member(uid) else f"`{uid}`"
+            for uid in uids
+        ) or "—"
 
-    # 4) Embed
     emb = discord.Embed(
-        title="🎲 Random Matchups",
-        description="Хэн хэнтэй тоглохыг санамсаргүй хослууллаа.",
-        color=0x00B2FF
+        title="🎲 Matchups — Random Pairings",
+        description="DotA style: **Scourge vs Sentinel**",
+        color=0x2ecc71
     )
-    for a, b in pairs:
+
+    for i, (a, b) in enumerate(pairs, start=1):
         emb.add_field(
-            name=f"⚔️ Team {a} vs Team {b}",
-            value=f"**Team {a}**: {team_members_str(a)}\n**Team {b}**: {team_members_str(b)}",
+            name=f"⚔️ Game {i}",
+            value=f"💀 **Scourge (Team {a})**: {team_members_str(a)}\n"
+                  f"🌿 **Sentinel (Team {b})**: {team_members_str(b)}",
             inline=False
         )
 
     if bye_team is not None:
         emb.add_field(
-            name="🕐 Bye (тэнцүү биш үед)",
+            name="🕐 Bye",
             value=f"**Team {bye_team}** амарна: {team_members_str(bye_team)}",
             inline=False
         )
 
-    emb.set_footer(text=("Seed: {}".format(seed) if seed is not None else "Seed хэрэглээгүй"))
+    emb.set_footer(text=("Seed: {}".format(seed) if seed is not None else "Random every time"))
     await interaction.followup.send(embed=emb)
+
 
 
 # 🎯 Run
