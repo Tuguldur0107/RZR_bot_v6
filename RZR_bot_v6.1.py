@@ -2679,7 +2679,7 @@ async def help_info(interaction: discord.Interaction):
 
     await interaction.response.send_message(
         f"📘 **RZR Bot Танилцуулга**\n```markdown\n{content}\n```",
-        ephemeral=True
+        # ephemeral=True
     )
 
 @bot.tree.command(name="help_commands", description="Бүх командын тайлбар жагсаалт")
@@ -2696,7 +2696,7 @@ async def help_commands(interaction: discord.Interaction):
 
     await interaction.response.send_message(
         f"📒 **RZR Bot Коммандууд**\n```markdown\n{content}\n```",
-        ephemeral=True
+        # ephemeral=True
     )
 
 @bot.tree.command(name="whois", description="Mention хийсэн хэрэглэгчийн нэрийг харуулна")
