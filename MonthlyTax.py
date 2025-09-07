@@ -121,14 +121,15 @@ def _format_member_rows(rows):
 @bot.event
 async def on_ready():
     print(f"✅ MonthlyTax ready: {bot.user}")
-    # Guild-д шууд sync (шууд харагдана)
     try:
-        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        guild_obj = discord.Object(id=GUILD_ID)
+        synced = await bot.tree.sync(guild=guild_obj)
+        print(f"slash synced to guild {GUILD_ID}: {[c.name for c in synced]}")
     except Exception as e:
-        print("guild sync error, trying global sync:", e)
-        # Ховор тохиолдолд global sync унагаад ядаж бүртгүүлчихье
+        print("guild sync error:", e)
         try:
-            await bot.tree.sync()
+            synced = await bot.tree.sync()
+            print(f"global slash synced: {[c.name for c in synced]}")
         except Exception as e2:
             print("global sync error:", e2)
     tax_check.start()
