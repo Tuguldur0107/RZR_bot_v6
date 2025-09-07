@@ -85,11 +85,33 @@ TIER_WEIGHT = {
     "5-1":  20, "5-2":  15, "5-3":  10, "5-4":   5, "5-5":   0
 }
 
-def calculate_weight(data):
-    tier = data.get("tier", "4-1")
-    score = data.get("score", 0)
-    tier_weight = TIER_WEIGHT.get(tier, 0)
-    return max(tier_weight + score, 0)
+# ---- Legend∞ тохиргоо (хязгааргүй дээш) ----
+LEGEND_PREFIX = "Legend"
+LEGEND_BASE_WEIGHT = 130    # 1-1 (120)-оос дээш эхлэх суурь жин
+LEGEND_STEP       = 10      # Legend N тутамд нэмэгдэх алхам (ж: L1=130, L2=140, ...)
+
+def is_legend(tier: str) -> bool:
+    return isinstance(tier, str) and tier.strip().lower().startswith(LEGEND_PREFIX.lower())
+
+def parse_legend_level(tier: str) -> int:
+    """'Legend 7' -> 7, 'Legend' -> 1 (fallback)"""
+    try:
+        parts = tier.strip().split()
+        return int(parts[1]) if len(parts) > 1 else 1
+    except Exception:
+        return 1
+
+def legend_weight(level: int) -> int:
+    return LEGEND_BASE_WEIGHT + (max(1, int(level)) - 1) * LEGEND_STEP
+
+def is_valid_tier(tier: str) -> bool:
+    """Numeric (TIER_ORDER) эсвэл Legend N аль алиныг зөвшөөрнө."""
+    if is_legend(tier):
+        # 'Legend' эсвэл 'Legend N' (N>=1) зөвшөөрнө
+        lvl = parse_legend_level(tier)
+        return lvl >= 1
+    return tier in TIER_ORDER
+
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -189,23 +211,43 @@ def local_refine(teams, weights, max_rounds=200):
             break
     return T, best
 
-def tier_score(data: dict) -> int:
-    tier = data.get("tier", "4-1")
-    score = data.get("score", 0)
-    return TIER_WEIGHT.get(tier, 0) + score
 
-def promote_tier(tier):  # Сайжрах → index -1
+def calculate_weight(data: dict) -> int:
+    tier = (data or {}).get("tier", "4-1")
+    score = int((data or {}).get("score", 0))
+    if is_legend(tier):
+        w = legend_weight(parse_legend_level(tier)) + score
+        return max(w, 0)
+    base = TIER_WEIGHT.get(tier, 0)
+    return max(base + score, 0)
+
+def tier_score(data: dict) -> int:
+    """Эрэмбэлэлтэд ашиглах (weight-тэй ижил логик)."""
+    return calculate_weight(data)
+
+def promote_tier(tier: str) -> str:
+    """1-1 -> Legend 1 -> Legend 2 -> ... (хязгааргүй)"""
+    if is_legend(tier):
+        lvl = parse_legend_level(tier)
+        return f"{LEGEND_PREFIX} {lvl+1}"
+    if tier == "1-1":
+        return f"{LEGEND_PREFIX} 1"
     try:
         i = TIER_ORDER.index(tier)
         return TIER_ORDER[max(i + 1, 0)]
-    except:
+    except ValueError:
+        # Танихгүй tier бол өөрчилөхгүй үлдээнэ
         return tier
 
-def demote_tier(tier):  # Дордох → index +1
+def demote_tier(tier: str) -> str:
+    """Legend N -> Legend N-1 -> ... -> Legend 1 -> 1-1 -> ..."""
+    if is_legend(tier):
+        lvl = parse_legend_level(tier)
+        return "1-1" if lvl <= 1 else f"{LEGEND_PREFIX} {lvl-1}"
     try:
         i = TIER_ORDER.index(tier)
         return TIER_ORDER[min(i - 1, len(TIER_ORDER) - 1)]
-    except:
+    except ValueError:
         return tier
 
 def generate_tier_order():
@@ -1024,32 +1066,34 @@ NUMERIC_TIER_TO_META = {
     1: "S",
 }
 
-TIER_META = {
-    "S": {"color": 0xF59E0B, "emoji": "🏆"},
-    "A": {"color": 0x22C55E, "emoji": "🟢"},
-    "B": {"color": 0x3B82F6, "emoji": "🔵"},
-    "C": {"color": 0x9333EA, "emoji": "🟣"},
-    "D": {"color": 0xE5E7EB, "emoji": "⚪"},
-    "E": {"color": 0xEF4444, "emoji": "🟥"},
-}
-
 def tier_style(tier: str) -> tuple[discord.Color, str]:
-    """'3-2' / '4-1' / 'S' гэх мэт tier-ээс (Color, emoji) буцаана."""
-    t = (tier or "").strip().upper()
+    """
+    Графикт ашиглах өнгө/emoji-г энгийн дүрмээр өгөх:
+      Legend*  -> алт (👑)
+      1-x      -> алтан шар (🏆)
+      2-x      -> ногоон (🟢)
+      3-x      -> цэнхэр (🔵)
+      4-x      -> ягаавтар (🟣)
+      5-x      -> улаан (🟥)
+      бусад    -> discord default (🔹)
+    """
+    if not isinstance(tier, str):
+        return discord.Color(0x5865F2), "🔹"
 
-    meta = TIER_META.get(t)
-    if not meta:
-        m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", t)
-        if m:
-            major = int(m.group(1))
-            key = NUMERIC_TIER_TO_META.get(major, "E")
-            meta = TIER_META.get(key, TIER_META["E"])
-        else:
-            meta = TIER_META["E"]
+    t = tier.strip()
+    if is_legend(t):
+        return discord.Color(0xFFD700), "👑"
 
-    c = meta.get("color", 0x5865F2)
-    colour = discord.Color(c if isinstance(c, int) else int(str(c).lstrip("#"), 16))
-    return colour, meta.get("emoji", "🔹")
+    m = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", t)
+    if m:
+        major = int(m.group(1))
+        if major == 1: return discord.Color(0xF59E0B), "🏆"
+        if major == 2: return discord.Color(0x22C55E), "🟢"
+        if major == 3: return discord.Color(0x3B82F6), "🔵"
+        if major == 4: return discord.Color(0x9333EA), "🟣"
+        if major == 5: return discord.Color(0xEF4444), "🟥"
+
+    return discord.Color(0x5865F2), "🔹"
 
 def _clamp(v, lo, hi):
     return max(lo, min(hi, v))
@@ -1777,7 +1821,8 @@ async def set_match_result(interaction: discord.Interaction, winner_teams: str, 
     # 🆕 winners/losers бүх UID-д scores-д default бичлэг үүсгэнэ
     await ensure_scores_for_users(guild, list(set(winners + losers)))
 
-    def validate_tier(tier): return tier if tier in TIER_ORDER else "4-1"
+    def validate_tier(tier): 
+        return tier if is_valid_tier(tier) else "4-1"
 
     def adjust_score(data, delta):
         data["score"] += delta
@@ -1944,7 +1989,9 @@ async def set_match_result_fountain(interaction: discord.Interaction, winner_tea
     # 🆕 scores-д default үүсгэнэ
     await ensure_scores_for_users(guild, list(set(winners + losers)))
 
-    def validate_tier(tier): return tier if tier in TIER_ORDER else "4-1"
+    def validate_tier(tier):
+        return tier if is_valid_tier(tier) else "4-1"
+    
     def adjust_score(data, delta):
         data["score"] += delta
         if data["score"] >= 5:
@@ -2362,8 +2409,7 @@ async def set_tier(interaction: discord.Interaction, user: discord.Member, tier:
         await interaction.response.send_message("⛔️ Зөвхөн админ тохируулж чадна.", ephemeral=True)
         return
 
-    tier_list = list(TIER_WEIGHT.keys())
-    if tier not in tier_list:
+    if not is_valid_tier(tier):
         await interaction.response.send_message("⚠️ Tier утга буруу байна.", ephemeral=True)
         return
 
@@ -2674,8 +2720,8 @@ async def help_info(interaction: discord.Interaction):
         await interaction.response.send_message("⚠️ `Readme.md` файл олдсонгүй.", ephemeral=True)
         return
 
-    if len(content) > 3000:
-        content = content[:3000] + "\n...\n(үргэлжлэлтэй)"
+    if len(content) > 2000:
+        content = content[:2000] + "\n...\n(үргэлжлэлтэй)"
 
     await interaction.response.send_message(
         f"📘 **RZR Bot Танилцуулга**\n```markdown\n{content}\n```",
@@ -2691,8 +2737,8 @@ async def help_commands(interaction: discord.Interaction):
         await interaction.response.send_message("⚠️ `Commands_alt.md` файл олдсонгүй.", ephemeral=True)
         return
 
-    if len(content) > 3000:
-        content = content[:3000] + "\n...\n(үргэлжлэлтэй)"
+    if len(content) > 2000:
+        content = content[:2000] + "\n...\n(үргэлжлэлтэй)"
 
     await interaction.response.send_message(
         f"📒 **RZR Bot Коммандууд**\n```markdown\n{content}\n```",
