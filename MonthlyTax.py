@@ -196,19 +196,21 @@ async def mark_unpaid(interaction: discord.Interaction, user: discord.Member):
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild or bot.get_guild(GUILD_ID)
 
-    # tier аваад, DB-д нэг мөр үлдээнэ
     conn = await db()
     try:
+        # Tier-ийг аваад толгойг нь гаргана (ж: '4-3' -> 4)
         rec = await conn.fetchrow("SELECT tier FROM scores WHERE uid=$1", user.id)
         tier_head = _tier_head(rec["tier"] if rec else None)
 
+        # paid_until NOT NULL тул "өчигдөр" гэж тэмдэглэж дууссан төлөвт оруулна
         await conn.execute("""
             INSERT INTO monthlyFee (uid, amount, paid_until, status, note, created_at, updated_at)
-            VALUES ($1, 0, NULL, 'unpaid', 'manual-unpaid', now(), now())
+            VALUES ($1, 0, CURRENT_DATE - 1, 'unpaid', 'manual-unpaid', now(), now())
         """, user.id)
     finally:
         await conn.close()
 
+    # Ролиудыг шинэчилнэ
     await _set_member_roles(guild, user, tier_head, is_paid=False)
     await interaction.followup.send(f"🚫 {user.mention} төлбөрийн статус: **unpaid** боллоо.", ephemeral=True)
 
@@ -358,26 +360,23 @@ async def setup_pay_channel(interaction: discord.Interaction, channel_name: str 
     await interaction.response.defer(ephemeral=True)
     guild = interaction.guild or bot.get_guild(GUILD_ID)
 
-    # 1) суваг үүсгэх (байхгүй бол)
     ch = discord.utils.get(guild.text_channels, name=channel_name)
     if not ch:
         ch = await guild.create_text_channel(channel_name, topic="Хураамж төлөх мэдээлэл", reason="create pay channel")
 
-    # 2) ролиуд
     everyone = guild.default_role
     unpaid   = discord.utils.get(guild.roles, name="Unpaid")
     paid_roles = [discord.utils.get(guild.roles, name=f"Paid-T{i}") for i in range(1, 6)]
-    admin_roles = [r for r in guild.roles if r.permissions.administrator]
 
-    # 3) зөвшөөрөл — бүгд харах, зөвхөн админ бичих
+    # Бүгд харах, бичихгүй
     ow = { everyone: discord.PermissionOverwrite(view_channel=True, send_messages=False, read_message_history=True) }
     if unpaid:
         ow[unpaid] = discord.PermissionOverwrite(view_channel=True, send_messages=False, read_message_history=True)
+
+    # Paid-ууд ч бас харах, бичихгүй (админ эрхтэй нь байгалиараа бичиж чадна)
     for pr in paid_roles:
         if pr:
             ow[pr] = discord.PermissionOverwrite(view_channel=True, send_messages=False, read_message_history=True)
-    for ar in admin_roles:
-        ow[ar] = discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_messages=True, read_message_history=True)
 
     await ch.edit(overwrites=ow, reason="pay channel perms")
     await interaction.followup.send(f"✅ Сувгийн зөвшөөрөл тохирлоо: #{ch.name}", ephemeral=True)
