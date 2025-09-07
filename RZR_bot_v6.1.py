@@ -2244,67 +2244,67 @@ async def undo_last_match(interaction: discord.Interaction):
         print("❌ Match буцаах үед алдаа гарлаа:", e)
         await interaction.followup.send("❌ Match буцаах үед алдаа гарлаа.")
 
-@bot.tree.command(name="my_score", description="Таны tier, score, weight-ийг харуулна")
-async def my_score(interaction: discord.Interaction):
-    try:
-        await interaction.response.defer(thinking=True)  # public
-    except discord.errors.InteractionResponded:
-        return
+# @bot.tree.command(name="my_score", description="Таны tier, score, weight-ийг харуулна")
+# async def my_score(interaction: discord.Interaction):
+#     try:
+#         await interaction.response.defer(thinking=True)  # public
+#     except discord.errors.InteractionResponded:
+#         return
 
-    uid = interaction.user.id
-    try:
-        data = await asyncio.wait_for(get_score(uid), timeout=GET_SCORE_TIMEOUT)
-    except asyncio.TimeoutError:
-        return await interaction.followup.send("⏱️ Оноог авахад удааширлаа. Дахин оролдоно уу.")
-    except Exception as e:
-        return await interaction.followup.send(f"⚠️ Оноог уншихад алдаа: {e}")
+#     uid = interaction.user.id
+#     try:
+#         data = await asyncio.wait_for(get_score(uid), timeout=GET_SCORE_TIMEOUT)
+#     except asyncio.TimeoutError:
+#         return await interaction.followup.send("⏱️ Оноог авахад удааширлаа. Дахин оролдоно уу.")
+#     except Exception as e:
+#         return await interaction.followup.send(f"⚠️ Оноог уншихад алдаа: {e}")
 
-    if not data:
-        return await interaction.followup.send("⚠️ Таны оноо бүртгэлгүй байна.")
+#     if not data:
+#         return await interaction.followup.send("⚠️ Таны оноо бүртгэлгүй байна.")
 
-    try:
-        raw_tier = str(data.get("tier", "E")).strip()
-        score = int(data.get("score", 0))
-        username = data.get("username") or interaction.user.display_name
+#     try:
+#         raw_tier = str(data.get("tier", "E")).strip()
+#         score = int(data.get("score", 0))
+#         username = data.get("username") or interaction.user.display_name
 
-        # weight (танай calculate_weight-ыг ашиглана)
-        try:
-            weight = int(calculate_weight(data))
-        except Exception:
-            base = int(TIER_WEIGHT.get(raw_tier, 0))
-            weight = max(base + score, 0)
+#         # weight (танай calculate_weight-ыг ашиглана)
+#         try:
+#             weight = int(calculate_weight(data))
+#         except Exception:
+#             base = int(TIER_WEIGHT.get(raw_tier, 0))
+#             weight = max(base + score, 0)
 
-        bar, pct, steps = _score_progress(score, width=18)
-        colour, emoji = tier_style(raw_tier)
+#         bar, pct, steps = _score_progress(score, width=18)
+#         colour, emoji = tier_style(raw_tier)
 
-        emb = discord.Embed(
-            title=f"{emoji} {username}",
-            description="**Таны Tier • Score • Weight**",
-            colour=colour,
-            timestamp=datetime.now(timezone.utc),
-        )
-        emb.set_thumbnail(url=interaction.user.display_avatar.url)
-        emb.add_field(name="Tier",   value=f"**{raw_tier}**",    inline=True)
-        emb.add_field(name="Score",  value=f"**{_num(score)}**", inline=True)
-        emb.add_field(name="Weight", value=f"**{_num(weight)}**", inline=True)
+#         emb = discord.Embed(
+#             title=f"{emoji} {username}",
+#             description="**Таны Tier • Score • Weight**",
+#             colour=colour,
+#             timestamp=datetime.now(timezone.utc),
+#         )
+#         emb.set_thumbnail(url=interaction.user.display_avatar.url)
+#         emb.add_field(name="Tier",   value=f"**{raw_tier}**",    inline=True)
+#         emb.add_field(name="Score",  value=f"**{_num(score)}**", inline=True)
+#         emb.add_field(name="Weight", value=f"**{_num(weight)}**", inline=True)
 
-        if "rank" in data:
-            emb.add_field(name="Rank", value=f"#{_num(data['rank'])}", inline=True)
+#         if "rank" in data:
+#             emb.add_field(name="Rank", value=f"#{_num(data['rank'])}", inline=True)
 
-        stats = []
-        if "wins" in data:   stats.append(f"✅ Wins: **{_num(data['wins'])}**")
-        if "losses" in data: stats.append(f"❌ Losses: **{_num(data['losses'])}**")
-        if "games" in data:  stats.append(f"🎮 Games: **{_num(data['games'])}**")
-        if stats:
-            emb.add_field(name="Товч статистик", value="\n".join(stats), inline=False)
+#         stats = []
+#         if "wins" in data:   stats.append(f"✅ Wins: **{_num(data['wins'])}**")
+#         if "losses" in data: stats.append(f"❌ Losses: **{_num(data['losses'])}**")
+#         if "games" in data:  stats.append(f"🎮 Games: **{_num(data['games'])}**")
+#         if stats:
+#             emb.add_field(name="Товч статистик", value="\n".join(stats), inline=False)
 
-        emb.add_field(name="Дараагийн шат хүртэл", value=f"`{bar}`  {pct}% • **{steps}/10**", inline=False)
-        emb.set_footer(text=f"User ID: {uid}")
+#         emb.add_field(name="Дараагийн шат хүртэл", value=f"`{bar}`  {pct}% • **{steps}/10**", inline=False)
+#         emb.set_footer(text=f"User ID: {uid}")
 
-        await interaction.followup.send(embed=emb)
-    except Exception as e:
-        # UI рендер үеийн ямар ч алдаа энд баригдаж мессэж бууна — "уншаад алга болох" асуудлыг хаана.
-        await interaction.followup.send(f"⚠️ Дэлгэцэн дээр харуулахад алдаа: {type(e).__name__}: {e}")
+#         await interaction.followup.send(embed=emb)
+#     except Exception as e:
+#         # UI рендер үеийн ямар ч алдаа энд баригдаж мессэж бууна — "уншаад алга болох" асуудлыг хаана.
+#         await interaction.followup.send(f"⚠️ Дэлгэцэн дээр харуулахад алдаа: {type(e).__name__}: {e}")
 
 @bot.tree.command(name="user_score", description="Бусад тоглогчийн tier, score, weight-ийг харуулна")
 @app_commands.describe(user="Оноог нь харах discord хэрэглэгч")
