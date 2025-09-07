@@ -1234,48 +1234,48 @@ async def ping(interaction: discord.Interaction):
 
 START_MATCH_BANNER = Path("assets/Start_match.png")
 
-@bot.tree.command(name="start_match", description="Session эхлүүлнэ (шинэ тоглолтын session)")
-async def start_match(interaction: discord.Interaction):
+# @bot.tree.command(name="start_match", description="Session эхлүүлнэ (шинэ тоглолтын session)")
+# async def start_match(interaction: discord.Interaction):
 
-    # 1) Interaction-ийг эхлээд acknowledge (дараа нь followup-уудаар явуулна)
-    try:
-        await interaction.response.defer(ephemeral=False, thinking=False)
-    except discord.errors.InteractionResponded:
-        pass
+#     # 1) Interaction-ийг эхлээд acknowledge (дараа нь followup-уудаар явуулна)
+#     try:
+#         await interaction.response.defer(ephemeral=False, thinking=False)
+#     except discord.errors.InteractionResponded:
+#         pass
 
-    # 2) Өмнөх match/session-уудыг цэвэрлэх
-    try:
-        await clear_last_match()
-    except Exception as e:
-        print("⚠️ clear_last_match алдаа:", e)
+#     # 2) Өмнөх match/session-уудыг цэвэрлэх
+#     try:
+#         await clear_last_match()
+#     except Exception as e:
+#         print("⚠️ clear_last_match алдаа:", e)
 
-    try:
-        await clear_session_state()
-        print("🧼 өмнөх session_state устлаа.")
-    except Exception as e:
-        print("❌ clear_session_state алдаа:", e)
+#     try:
+#         await clear_session_state()
+#         print("🧼 өмнөх session_state устлаа.")
+#     except Exception as e:
+#         print("❌ clear_session_state алдаа:", e)
 
-    # 3) Шинэ session үүсгэх (UTC ISO string-ээр хадгална)
-    now = datetime.now(timezone.utc)
-    session = {
-        "active": True,
-        "start_time": now.isoformat(),
-        "last_win_time": now.isoformat(),
-        "initiator_id": interaction.user.id,
-        "player_ids": [],
-        "teams": [],
-        "changed_players": [],
-        "strategy": ""
-    }
-    try:
-        await save_session_state(session, allow_empty=True)
-    except Exception as e:
-        print("❌ save_session_state алдаа:", e)
-        return await interaction.followup.send("⚠️ Session эхлүүлэхэд алдаа гарлаа.", ephemeral=True)
+#     # 3) Шинэ session үүсгэх (UTC ISO string-ээр хадгална)
+#     now = datetime.now(timezone.utc)
+#     session = {
+#         "active": True,
+#         "start_time": now.isoformat(),
+#         "last_win_time": now.isoformat(),
+#         "initiator_id": interaction.user.id,
+#         "player_ids": [],
+#         "teams": [],
+#         "changed_players": [],
+#         "strategy": ""
+#     }
+#     try:
+#         await save_session_state(session, allow_empty=True)
+#     except Exception as e:
+#         print("❌ save_session_state алдаа:", e)
+#         return await interaction.followup.send("⚠️ Session эхлүүлэхэд алдаа гарлаа.", ephemeral=True)
 
-    # 4) Баннертай анхны мэдэгдэл (нийтэд харагдана)
-    text = "🏁 **Match эхэллээ!** ADDME гэж бичээд бүртгүүлээрэй."
-    await _send_with_banner(interaction, text, banner_path=START_MATCH_BANNER, ephemeral=False)
+#     # 4) Баннертай анхны мэдэгдэл (нийтэд харагдана)
+#     text = "🏁 **Match эхэллээ!** ADDME гэж бичээд бүртгүүлээрэй."
+#     await _send_with_banner(interaction, text, banner_path=START_MATCH_BANNER, ephemeral=False)
 
 @bot.tree.command(name="addme", description="Тоглогч өөрийгөө бүртгүүлнэ")
 async def addme(interaction: discord.Interaction):
