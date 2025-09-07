@@ -418,6 +418,29 @@ async def apply_membership_lock(interaction: discord.Interaction, pay_channel: d
 
     await interaction.followup.send(f"✅ Бүх сувгийн зөвшөөрөл шинэчлэв. Нийт: **{changed}**", ephemeral=True)
 
+# ---- FORCE SYNC VIA PREFIX COMMANDS (for debugging) ----
+@bot.command(name="sync_here")
+@commands.has_permissions(administrator=True)
+async def sync_here(ctx: commands.Context):
+    """Тухайн сервер дээрх бүх slash командыг шууд бүртгэнэ."""
+    try:
+        synced = await bot.tree.sync(guild=ctx.guild)
+        names = ", ".join(c.name for c in synced) or "no-commands"
+        await ctx.reply(f"✅ Synced to **{ctx.guild.name}**: {names}", mention_author=False)
+    except Exception as e:
+        await ctx.reply(f"⚠️ sync error: `{e}`", mention_author=False)
+
+@bot.command(name="sync_global")
+@commands.has_permissions(administrator=True)
+async def sync_global(ctx: commands.Context):
+    """Global-р бүртгэнэ (илрэхэд 1–60 мин зарцуулагдаж магадгүй)."""
+    try:
+        synced = await bot.tree.sync()
+        names = ", ".join(c.name for c in synced) or "no-commands"
+        await ctx.reply(f"🌐 Global sync ok: {names}", mention_author=False)
+    except Exception as e:
+        await ctx.reply(f"⚠️ global sync error: `{e}`", mention_author=False)
+
 # өдөр бүр 1 удаа ажиллана
 @tasks.loop(hours=24)
 async def tax_check():
