@@ -7,8 +7,6 @@ from datetime import datetime, timezone, timedelta
 import unicodedata
 import re
 
-from collections import defaultdict
-
 # 🌿 Third-party modules
 import discord
 from discord import app_commands, Embed
@@ -1196,130 +1194,96 @@ def _shorten(text: str | None, limit: int) -> str:
 
 
 
-# ==== Interaction (deprecated/шинэ аль аль) ==================================
-def _ix_info(m: discord.Message):
-    meta = getattr(m, "interaction_metadata", None) or getattr(m, "interaction", None)
-    if not meta:
-        return None
-    user = getattr(meta, "user", None)
-    name = getattr(meta, "name", None) or getattr(meta, "command_name", None) or ""
-    return {
-        "cmd": name.lower(),
-        "invoker_id": getattr(user, "id", None) if user else None,
-        "invoker_name": (getattr(user, "display_name", None) or getattr(user, "name", None) or "unknown") if user else "unknown",
-    }
 
-# ==== Message text (content + embed) ========================================
-def _full_text(m: discord.Message) -> str:
-    parts = [m.content or ""]
-    for e in (m.embeds or []):
-        if e.title: parts.append(str(e.title))
-        if e.description: parts.append(str(e.description))
-        for f in (getattr(e, "fields", []) or []):
-            parts.append(f"{f.name}: {f.value}")
-        if e.footer and getattr(e.footer, "text", None):
-            parts.append(str(e.footer.text))
-    return "\n".join(p for p in parts if p)
 
-# ==== Channel scan ===========================================================
-async def _scan_channel(ch: discord.TextChannel, cutoff: datetime):
-    pairs = []
+
+INT32_MIN, INT32_MAX = -2147483648, 2147483647
+
+def _clamp_i32(v: int) -> int:
     try:
-        async for m in ch.history(limit=None, after=cutoff, oldest_first=True):
-            if not m.author.bot:
-                continue
-            info = _ix_info(m)
-            if not info:
-                continue
-            pairs.append((m, info))
-    except Exception as e:
-        print(f"⚠️ #{ch.name} ухахад алдаа: {e}")
-    return pairs
+        v = int(v)
+    except Exception:
+        v = 0
+    return max(INT32_MIN, min(INT32_MAX, v))
 
-# ==== Regex-үүд =============================================================
-MENTION_RE = re.compile(r"<@!?(?P<uid>\d+)>")
-SCORE_RE   = re.compile(r"(?:new\s*score|шинэ\s*оноо|оноо|score)\s*[:：]?\s*(-?\d+)", re.I)
-ARROW_RE   = re.compile(r"→\s*(-?\d+)")
-TIER_RE    = re.compile(r"(?:tier|түвшин|тир|rank)\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9\-]*)", re.I)
-
-def _parse_scores_block(text: str, fallback_uid: Optional[int] = None, default_tier="4-1"):
+def _pick_last(state: dict[int, dict], uid: int, ts: datetime, score: int | None, tier: str | None, username: str | None):
     """
-    Нэг мессеж доторх олон мөрөөс <@uid> гарсан мөр бүрийн SCORE/TIER-ийг уншина.
-    mention байхгүй (ж: /my_score) бол invoker-ийг fallback_uid-р онооно.
+    UID бүрийн хамгийн сүүлийн (том timestamp) state-ийг хадгална.
     """
-    out = {}
+    cur = state.get(uid)
+    if cur is None or ts > cur["ts"]:
+        d = cur["data"] if cur else {}
+        new_score = _clamp_i32(score if score is not None else int(d.get("score", 0)))
+        new_tier  = (tier or d.get("tier") or "4-1").strip()
+        if not is_valid_tier(new_tier):    # ← таны tier шалгагч
+            new_tier = "4-1"
+        state[uid] = {
+            "ts": ts,
+            "data": {
+                "uid": uid,
+                "username": username or d.get("username") or "Unknown",
+                "score": new_score,
+                "tier": new_tier
+            }
+        }
 
-    # 1) mention-тэй мөрүүд
-    for raw in text.splitlines():
-        ln = raw.strip()
-        if not ln:
-            continue
-        ment = MENTION_RE.search(ln)
-        if not ment:
-            continue
-        uid = int(ment.group("uid"))
-        score = None
-        tier = None
-        s = SCORE_RE.search(ln) or ARROW_RE.search(ln)
-        if s:
-            try: score = int(s.group(1))
-            except: pass
-        t = TIER_RE.search(ln)
-        if t:
-            tier = t.group(1)
-        if (score is not None) or tier:
-            cur = out.get(uid, {})
-            cur["score"] = score if score is not None else cur.get("score")
-            cur["tier"]  = tier  if tier  else cur.get("tier", default_tier)
-            out[uid] = cur
+# --- ADD: parsers for different message styles ---
 
-    # 2) /my_score, /user_score — mention байхгүй байж болно
-    if not out and fallback_uid:
-        score = None
-        tier  = None
-        s = SCORE_RE.search(text) or ARROW_RE.search(text)
-        if s:
-            try: score = int(s.group(1))
-            except: pass
-        t = TIER_RE.search(text)
-        if t:
-            tier = t.group(1)
-        if (score is not None) or tier:
-            out[fallback_uid] = {"score": score, "tier": tier or default_tier}
+# /add_score followup text lines, example:
+# "<@123>: +2 | Score 3→5 | Tier: 4-1→4-1 (…)"  OR  "Tier: 4-1"
+_ADD_SCORE_LINE = re.compile(
+    r"<@(?P<uid>\d+)>\s*:\s*[+\-]?\d+.*?Score\s+[-]?\d+\s*→\s*(?P<score>[-]?\d+).*?(?:Tier[: ]\s*(?:(?:[^→\n]+)→)?\s*(?P<tier>[^\s|)]+))?",
+    re.IGNORECASE
+)
 
-    return out
+# set_match_result / set_match_result_fountain embed field lines, example:
+# "- <@123> — `3 → 4` · `[4-1 → 4-1]`"
+_SET_MATCH_LINE = re.compile(
+    r"<@(?P<uid>\d+)>\D+`[^`]*→\s*(?P<score>[-]?\d+)`\D+\[\s*(?:[^\]\s]+)\s*→\s*(?P<tier>[^\]\s]+)\s*\]",
+    re.IGNORECASE
+)
 
-# ==== Username cache =========================================================
-_member_cache: dict[int, str] = {}
-async def _username_for(guild: discord.Guild, uid: int) -> str:
-    if uid in _member_cache:
-        return _member_cache[uid]
-    m = guild.get_member(uid)
-    if not m:
-        try: m = await guild.fetch_member(uid)
-        except: _member_cache[uid] = str(uid); return _member_cache[uid]
-    _member_cache[uid] = (m.display_name or m.name)
-    return _member_cache[uid]
+# my_score / user_score embed fields: "Tier" / "Score"
+def _parse_score_embed_fields(emb_dict: dict) -> Tuple[int | None, str | None]:
+    score_val, tier_val = None, None
+    for f in emb_dict.get("fields", []) or []:
+        name = (f.get("name") or "").strip().lower()
+        val  = (f.get("value") or "").strip()
+        if name == "score":
+            # could be "**5**" or "+3"
+            m = re.search(r"[-+]?\d+", val)
+            if m:
+                score_val = int(m.group(0))
+        elif name == "tier":
+            # value like "**4-1**"
+            m = re.search(r"(Legend(?:\s+\d+)?)|(\d-\d)", val, re.IGNORECASE)
+            if m:
+                tier_val = m.group(0)
+    return score_val, tier_val
 
-# ==== int32 хамгаалалт =======================================================
-def _safe_i32(n: int | None) -> int:
-    if n is None: return 0
-    if n > 2_147_483_647:   return 2_147_483_647
-    if n < -2_147_483_648:  return -2_147_483_648
-    return n
+# /add_score whole message body (no embed) lines separated with newlines
+def _try_parse_add_score_text(text: str):
+    results = []
+    for line in (text or "").splitlines():
+        m = _ADD_SCORE_LINE.search(line)
+        if m:
+            uid   = int(m.group("uid"))
+            score = int(m.group("score"))
+            tier  = m.group("tier").strip() if m.group("tier") else None
+            results.append((uid, score, tier))
+    return results
 
-TARGET_CMDS = {"add_score","set_match_result","set_match_result_fountain","set_tier","my_score","user_score"}
-
-
-
-
-
-
-
-
-
-
-
+# set_match_result embed fields contain many lines; parse each line with _SET_MATCH_LINE
+def _try_parse_set_match_lines(field_value: str):
+    results = []
+    for line in (field_value or "").splitlines():
+        m = _SET_MATCH_LINE.search(line)
+        if m:
+            uid   = int(m.group("uid"))
+            score = int(m.group("score"))
+            tier  = m.group("tier").strip()
+            results.append((uid, score, tier))
+    return results
 
 
 
@@ -3562,83 +3526,100 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
 
 
-# ==== /restore_scores ========================================================
-@bot.tree.command(name="restore_score", description="Сонгосон channel (эсвэл channel_id)-оос сүүлийн N хоногийн оноо/түйрийг сэргээнэ")
+
+
+
+
+
+@bot.tree.command(name="restore_scores", description="Сувгийн түүхээс хамгийн сүүлийн score/tier-ийг сэргээнэ (админ)")
 @app_commands.describe(
-    channel="Channel picker-ээс сонго (хэрэв 10-хан харагдвал дараах 'channel_id'-г ашигла)",
-    channel_id="Autocomplete — 25 хүртэл channel гарна",
-    days="Хайх хоног (1–180, default 120)"
+    channel="Хайх текст суваг (picker)",
+    days="Сүүлийн хэдэн өдөрөөс хайх (default: 30)"
 )
-@app_commands.checks.has_permissions(administrator=True)
-async def restore_scores(
-    interaction: discord.Interaction,
-    channel: Optional[discord.TextChannel] = None,
-    channel_id: Optional[str] = None,
-    days: app_commands.Range[int, 1, 180] = 120
-):
-    await interaction.response.defer(thinking=True)
+@app_commands.default_permissions(administrator=True)
+async def restore_scores(interaction: discord.Interaction, channel: discord.TextChannel, days: int = 30):
+    # 0) Acknowledge
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.errors.InteractionResponded:
+        return
 
-    # channel resolve (picker эсвэл autocomplete аль нь ч болно)
-    ch = channel or (interaction.guild.get_channel(int(channel_id)) if channel_id else None)
-    if not ch:
-        return await interaction.followup.send("⚠️ Channel-аа сонго (picker) эсвэл 'channel_id' дээрээс сонгоно уу.")
+    # 1) Guard
+    if days < 1: days = 1
+    if days > 120: days = 120  # хатуу дээд хязгаар
+    after_dt = datetime.now(timezone.utc) - timedelta(days=days)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    pairs = await _scan_channel(ch, cutoff)
+    # 2) Pull history
+    state: dict[int, dict] = {}   # uid -> {"ts": dt, "data":{uid,username,score,tier}}
+    me = interaction.guild.me
 
-    latest: dict[int, dict] = {}  # uid -> {score, tier, ts}
-    for m, info in pairs:
-        cmd = (info["cmd"] or "")
-        if cmd not in TARGET_CMDS:
-            continue
-        text = _full_text(m)
-        block = _parse_scores_block(text, fallback_uid=info["invoker_id"], default_tier="4-1")
-        if not block:
-            continue
-        ts = m.created_at or datetime.now(timezone.utc)
-        for uid, st in block.items():
-            prev = latest.get(uid)
-            if (prev is None) or (ts > prev["ts"]):
-                latest[uid] = {
-                    "score": _safe_i32(st.get("score")),
-                    "tier":  st.get("tier") or (prev.get("tier") if prev else "4-1"),
-                    "ts": ts
-                }
-
-    # Batch UPSERT to public.scores (uid BIGINT, username TEXT, score INT, tier TEXT, updated_at TIMESTAMP)
-    rows = []
-    for uid, st in latest.items():
-        username_txt = str(int(uid))
-        rows.append((int(uid), username_txt, int(st["score"]), st["tier"]))
-
-    restored = 0
-    if rows:
-        conn = await db()
+    # NOTE: ephemeral мессеж түүхэнд үлдэхгүй — автоматаар алгасагдана (Discord API онцлог)
+    # Хайхдаа зөвхөн манай ботын илгээсэн мессежүүдийг (author == bot.user) голчлон үзнэ.
+    async for msg in channel.history(limit=None, after=after_dt, oldest_first=False):
         try:
-            async with conn.transaction():
-                await conn.executemany("""
-                    INSERT INTO public.scores (uid, username, score, tier, updated_at)
-                    VALUES ($1, $2, $3, $4, now())
-                    ON CONFLICT (uid) DO UPDATE
-                      SET username = EXCLUDED.username,
-                          score    = EXCLUDED.score,
-                          tier     = EXCLUDED.tier,
-                          updated_at = now();
-                """, rows)
-                restored = len(rows)
-        finally:
-            await conn.close()
+            if msg.author.id != bot.user.id:
+                continue
 
-    await interaction.followup.send(
-        f"✅ {ch.mention} дотор {restored} тоглогчийн оноо/түйрийг сэргээв. (сүүлийн {days} өдөр)"
-    )
+            ts = msg.created_at.replace(tzinfo=timezone.utc) if msg.created_at and msg.created_at.tzinfo is None else (msg.created_at or datetime.now(timezone.utc))
+            username_hint = None
 
-# ---- Autocomplete for channel_id (25 хүртэл channel) -----------------------
-@restore_scores.autocomplete('channel_id')
-async def _ac_channel_id(inter: discord.Interaction, current: str):
-    cur = (current or "").lower()
-    chans = [c for c in inter.guild.text_channels if not cur or cur in c.name.lower()]
-    return [app_commands.Choice(name=f"#{c.name}", value=str(c.id)) for c in chans[:25]]
+            # 2.1) /add_score: plain text lines
+            parsed_add = _try_parse_add_score_text(msg.content or "")
+            for uid, score, tier in parsed_add:
+                member = interaction.guild.get_member(uid)
+                username_hint = member.display_name if member else None
+                _pick_last(state, uid, ts, score, tier, username_hint)
+
+            # 2.2) Embeds
+            for emb in msg.embeds or []:
+                emb_d = emb.to_dict()
+                title = (emb_d.get("title") or "").lower()
+                desc  = emb_d.get("description") or ""
+
+                # set_match_result / _fountain: parse Winners/Losers fields
+                if "match result" in title:
+                    for fld in emb_d.get("fields", []) or []:
+                        # both winners/losers sections contain the same line format
+                        for uid, score, tier in _try_parse_set_match_lines(fld.get("value") or ""):
+                            member = interaction.guild.get_member(uid)
+                            username_hint = member.display_name if member else None
+                            _pick_last(state, uid, ts, score, tier, username_hint)
+                    continue
+
+                # my_score / user_score embeds: have named fields "Tier" / "Score"
+                if "tier • score • weight" in (emb_d.get("description") or "").lower() \
+                   or "тоглогчийн tier • score • weight" in (emb_d.get("description") or "").lower():
+                    # find target uid from author thumbnail or title if possible; fallback to mention in content
+                    # Easier: grab any mention in msg (bot embeds often not mention). If none, skip UID resolution.
+                    uid_candidates = [m.id for m in msg.mentions] if msg.mentions else []
+                    sc, tr = _parse_score_embed_fields(emb_d)
+                    if (sc is not None) or (tr is not None):
+                        for uid in uid_candidates:
+                            member = interaction.guild.get_member(uid)
+                            username_hint = member.display_name if member else None
+                            _pick_last(state, uid, ts, sc, tr, username_hint)
+
+        except Exception as e:
+            # алдаатай мессежүүдийг зүгээр алгасна
+            continue
+
+    if not state:
+        return await interaction.followup.send(f"📭 `#{channel.name}` дотор тохирох мессеж олдсонгүй. (сүүлийн {days} өдөр)")
+
+    # 3) Persist to DB (upsert_score)
+    from database import upsert_score
+    ok = 0
+    for uid, item in state.items():
+        data = item["data"]
+        try:
+            await upsert_score(uid, _clamp_i32(data["score"]), data["tier"], data.get("username") or "Unknown")
+            ok += 1
+        except Exception as e:
+            # нэг нэгээр нь бичиж байгаа тул бусдыг үргэлжлүүлнэ
+            continue
+
+    # 4) Done
+    await interaction.followup.send(f"✅ `#{channel.name}` дотор **{ok}** тоглогчийн оноо/түйрийг сэргээв. (сүүлийн {days} өдөр)")
 
 
 
