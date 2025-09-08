@@ -1196,14 +1196,8 @@ def _shorten(text: str | None, limit: int) -> str:
 
 
 
-# ==== ТУСЛАХ: interaction metadata-г аюулгүй авах ============================
+# ==== Interaction (deprecated/шинэ аль аль) ==================================
 def _ix_info(m: discord.Message):
-    """
-    Discord API v10+: message.interaction (deprecated) -> message.interaction_metadata
-    Аль алиныг нь дэмжинэ. Буцаалт:
-      {"cmd": "add_score"|"set_match_result"|..., "invoker_id": int, "invoker_name": str}
-    Олдохгүй бол None.
-    """
     meta = getattr(m, "interaction_metadata", None) or getattr(m, "interaction", None)
     if not meta:
         return None
@@ -1215,7 +1209,7 @@ def _ix_info(m: discord.Message):
         "invoker_name": (getattr(user, "display_name", None) or getattr(user, "name", None) or "unknown") if user else "unknown",
     }
 
-# ==== ТУСЛАХ: content + EMBED-г нийлүүлж авах ===============================
+# ==== Message text (content + embed) ========================================
 def _full_text(m: discord.Message) -> str:
     parts = [m.content or ""]
     for e in (m.embeds or []):
@@ -1227,9 +1221,8 @@ def _full_text(m: discord.Message) -> str:
             parts.append(str(e.footer.text))
     return "\n".join(p for p in parts if p)
 
-# ==== ТУСЛАХ: channel түүх унших ============================================
+# ==== Channel scan ===========================================================
 async def _scan_channel(ch: discord.TextChannel, cutoff: datetime):
-    """Сонгосон сувгаас cutoff-оос хойших БОТЫН interaction-тэй reply-үүдийг татна."""
     pairs = []
     try:
         async for m in ch.history(limit=None, after=cutoff, oldest_first=True):
@@ -1243,59 +1236,51 @@ async def _scan_channel(ch: discord.TextChannel, cutoff: datetime):
         print(f"⚠️ #{ch.name} ухахад алдаа: {e}")
     return pairs
 
-# ==== Regex-үүд (олон хэлбэр барина) ========================================
+# ==== Regex-үүд =============================================================
 MENTION_RE = re.compile(r"<@!?(?P<uid>\d+)>")
-SCORE_RE   = re.compile(r"(?:new\s*score|шинэ\s*оноо|оноо)\s*[:：]?\s*(-?\d+)", re.I)
-ARROW_RE   = re.compile(r"→\s*(-?\d+)")  # “→ 17”
-TIER_RE    = re.compile(r"(?:tier|түвшин|тир)\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9\-]*)", re.I)
+SCORE_RE   = re.compile(r"(?:new\s*score|шинэ\s*оноо|оноо|score)\s*[:：]?\s*(-?\d+)", re.I)
+ARROW_RE   = re.compile(r"→\s*(-?\d+)")
+TIER_RE    = re.compile(r"(?:tier|түвшин|тир|rank)\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9\-]*)", re.I)
 
-def _parse_scores_block(text: str, fallback_uid: Optional[int] = None, default_tier: str = "4-1"):
+def _parse_scores_block(text: str, fallback_uid: Optional[int] = None, default_tier="4-1"):
     """
-    Нэг мессеж доторхи олон мөрөөс <@uid> гарсан мөр тутам SCORE/TIER-ийг уншина.
-    Хэрэв mention олдохгүй боловч score/tier олдвол fallback_uid дээр тулгаж (ж: /my_score) буцаана.
-    Буцаалт: dict[uid] = {"score": int|None, "tier": str|None}
+    Нэг мессеж доторх олон мөрөөс <@uid> гарсан мөр бүрийн SCORE/TIER-ийг уншина.
+    mention байхгүй (ж: /my_score) бол invoker-ийг fallback_uid-р онооно.
     """
     out = {}
 
     # 1) mention-тэй мөрүүд
     for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
+        ln = raw.strip()
+        if not ln:
             continue
-        ment = MENTION_RE.search(line)
+        ment = MENTION_RE.search(ln)
         if not ment:
             continue
         uid = int(ment.group("uid"))
         score = None
         tier = None
-
-        s = SCORE_RE.search(line) or ARROW_RE.search(line)
+        s = SCORE_RE.search(ln) or ARROW_RE.search(ln)
         if s:
-            try:
-                score = int(s.group(1))
-            except:
-                pass
-
-        t = TIER_RE.search(line)
+            try: score = int(s.group(1))
+            except: pass
+        t = TIER_RE.search(ln)
         if t:
             tier = t.group(1)
-
         if (score is not None) or tier:
             cur = out.get(uid, {})
             cur["score"] = score if score is not None else cur.get("score")
             cur["tier"]  = tier  if tier  else cur.get("tier", default_tier)
             out[uid] = cur
 
-    # 2) mention олдоогүй ч /my_score маягийн хариу бол — invoker дээр онооно
+    # 2) /my_score, /user_score — mention байхгүй байж болно
     if not out and fallback_uid:
         score = None
-        tier = None
+        tier  = None
         s = SCORE_RE.search(text) or ARROW_RE.search(text)
         if s:
-            try:
-                score = int(s.group(1))
-            except:
-                pass
+            try: score = int(s.group(1))
+            except: pass
         t = TIER_RE.search(text)
         if t:
             tier = t.group(1)
@@ -1311,23 +1296,19 @@ async def _username_for(guild: discord.Guild, uid: int) -> str:
         return _member_cache[uid]
     m = guild.get_member(uid)
     if not m:
-        try:
-            m = await guild.fetch_member(uid)
-        except:
-            _member_cache[uid] = str(uid); return _member_cache[uid]
+        try: m = await guild.fetch_member(uid)
+        except: _member_cache[uid] = str(uid); return _member_cache[uid]
     _member_cache[uid] = (m.display_name or m.name)
     return _member_cache[uid]
 
-# ==== INT32 хамгаалалт (санамсаргүй том тоо орохоос сэргийлнэ) ==============
+# ==== int32 хамгаалалт =======================================================
 def _safe_i32(n: int | None) -> int:
-    if n is None:
-        return 0
-    if n > 2_147_483_647:   # int32 max
-        return 2_147_483_647
-    if n < -2_147_483_648:  # int32 min
-        return -2_147_483_648
+    if n is None: return 0
+    if n > 2_147_483_647:   return 2_147_483_647
+    if n < -2_147_483_648:  return -2_147_483_648
     return n
 
+TARGET_CMDS = {"add_score","set_match_result","set_match_result_fountain","set_tier","my_score","user_score"}
 
 
 
@@ -3581,59 +3562,57 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
 
 
-# =============================================================================
-# /restore_scores — Зөвхөн SCORE сэргээх (channel-оор, өдөр зааж)
-# =============================================================================
-TARGET_CMDS = {"add_score", "set_match_result", "set_match_result_fountain", "set_tier", "my_score", "user_score"}
-
-@bot.tree.command(name="restore_scores", description="Сонгосон channel-оос сүүлийн N хоногийн оноо/түйрийг сэргээнэ (DB-д шууд бичнэ)")
+# ==== /restore_scores ========================================================
+@bot.tree.command(name="restore_score", description="Сонгосон channel (эсвэл channel_id)-оос сүүлийн N хоногийн оноо/түйрийг сэргээнэ")
 @app_commands.describe(
-    channel="Ямар channel-оос сэргээх вэ?",
+    channel="Channel picker-ээс сонго (хэрэв 10-хан харагдвал дараах 'channel_id'-г ашигла)",
+    channel_id="Autocomplete — 25 хүртэл channel гарна",
     days="Хайх хоног (1–180, default 120)"
 )
 @app_commands.checks.has_permissions(administrator=True)
 async def restore_scores(
     interaction: discord.Interaction,
-    channel: discord.TextChannel,
+    channel: Optional[discord.TextChannel] = None,
+    channel_id: Optional[str] = None,
     days: app_commands.Range[int, 1, 180] = 120
 ):
     await interaction.response.defer(thinking=True)
 
+    # channel resolve (picker эсвэл autocomplete аль нь ч болно)
+    ch = channel or (interaction.guild.get_channel(int(channel_id)) if channel_id else None)
+    if not ch:
+        return await interaction.followup.send("⚠️ Channel-аа сонго (picker) эсвэл 'channel_id' дээрээс сонгоно уу.")
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    pairs = await _scan_channel(channel, cutoff)
+    pairs = await _scan_channel(ch, cutoff)
 
-    # uid бүрийн ХАМГИЙН СҮҮЛИЙН state
-    latest: dict[int, dict] = {}  # {uid: {"score": int, "tier": str, "ts": datetime}}
-
+    latest: dict[int, dict] = {}  # uid -> {score, tier, ts}
     for m, info in pairs:
         cmd = (info["cmd"] or "")
         if cmd not in TARGET_CMDS:
             continue
-
         text = _full_text(m)
         block = _parse_scores_block(text, fallback_uid=info["invoker_id"], default_tier="4-1")
         if not block:
             continue
-
         ts = m.created_at or datetime.now(timezone.utc)
         for uid, st in block.items():
             prev = latest.get(uid)
             if (prev is None) or (ts > prev["ts"]):
                 latest[uid] = {
                     "score": _safe_i32(st.get("score")),
-                    "tier":  (st.get("tier") or (prev.get("tier") if prev else "4-1")),
+                    "tier":  st.get("tier") or (prev.get("tier") if prev else "4-1"),
                     "ts": ts
                 }
 
-    # DB руу БАГЦ Upsert (scores: uid(bigint), username(text), score(int), tier(text), updated_at)
+    # Batch UPSERT to public.scores (uid BIGINT, username TEXT, score INT, tier TEXT, updated_at TIMESTAMP)
     rows = []
     for uid, st in latest.items():
-        username = await _username_for(interaction.guild, int(uid))
-        rows.append((int(uid), username, int(st["score"]), st["tier"]))
+        username_txt = str(int(uid))
+        rows.append((int(uid), username_txt, int(st["score"]), st["tier"]))
 
     restored = 0
     if rows:
-        # таны төслийн db() helper-ийг ашиглая
         conn = await db()
         try:
             async with conn.transaction():
@@ -3651,9 +3630,15 @@ async def restore_scores(
             await conn.close()
 
     await interaction.followup.send(
-        f"✅ {channel.mention} дотор {restored} тоглогчийн оноо/түйрийг сэргээв. (сүүлийн {days} өдөр)"
+        f"✅ {ch.mention} дотор {restored} тоглогчийн оноо/түйрийг сэргээв. (сүүлийн {days} өдөр)"
     )
 
+# ---- Autocomplete for channel_id (25 хүртэл channel) -----------------------
+@restore_scores.autocomplete('channel_id')
+async def _ac_channel_id(inter: discord.Interaction, current: str):
+    cur = (current or "").lower()
+    chans = [c for c in inter.guild.text_channels if not cur or cur in c.name.lower()]
+    return [app_commands.Choice(name=f"#{c.name}", value=str(c.id)) for c in chans[:25]]
 
 
 
