@@ -1187,6 +1187,18 @@ def _shorten(text: str | None, limit: int) -> str:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 # ---------- Autocomplete (25 хүртэл channel) ----------
 async def _channel_choices(guild, current: str):
     # нэрээр нь шүүж, 25 хүргээд буцаана
@@ -1215,18 +1227,52 @@ async def _fetch_all_messages(guild, cutoff: datetime):
             print(f"⚠️ Channel ухахад алдаа #{ch.name}: {e}")
     return msgs
 
-# ---------- Туслах: channel доторхи мессежийг ухах ----------
+# --- CHANNEL УХАХ ФУНКЦ (шинэчлэгдсэн шалгалттай) ---------------------------
 async def _fetch_channel_messages(ch, cutoff):
     msgs = []
     try:
         async for m in ch.history(limit=None, after=cutoff, oldest_first=True):
-            if m.author.bot and m.interaction:
-                msgs.append(m)
+            if not m.author.bot:
+                continue
+            info = _extract_interaction(m)
+            if info is None:
+                continue
+            msgs.append((m, info))  # мессеж + interaction info хосоор нь хадгална
     except Exception as e:
         print(f"⚠️ Channel ухахад алдаа #{ch.name}: {e}")
     return msgs
 
 
+# --- НЭМЭЛТ ТУСЛАХ ФУНКЦ -----------------------------------------------------
+def _extract_interaction(m):
+    """
+    Discord API v10: message.interaction (deprecated) -> message.interaction_metadata
+    Энэ функц хуучин/шинэ хэлбэрийг хоёуланг нь дэмжээд:
+      - command name
+      - user id / username
+    -ийг буцаана.
+    """
+    meta = getattr(m, "interaction_metadata", None)
+    if meta is None:
+        meta = getattr(m, "interaction", None)
+    if meta is None:
+        return None
+
+    # user
+    user = getattr(meta, "user", None)
+    user_id = getattr(user, "id", None) if user else None
+    username = getattr(user, "display_name", None) or getattr(user, "name", None)
+
+    # командын нэр
+    # discord.py-ийн хувилбараас шалтгаалаад .name эсвэл .command_name гэж байж болно
+    cmd_name = getattr(meta, "name", None) or getattr(meta, "command_name", None)
+
+    return {
+        "user_id": user_id,
+        "username": username,
+        "name": cmd_name,
+        "raw": meta,
+    }
 
 
 
@@ -3461,7 +3507,7 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
 
 
-# ---------- SCORES ----------
+# --- /restore_scores (interaction_metadata ашигладаг болгов) -----------------
 @bot.tree.command(name="restore_scores", description="Сонгосон channel-оос онооны өгөгдлийг сэргээнэ")
 @app_commands.describe(channel="Ямар channel-оос сэргээх вэ? (autocomplete)")
 @app_commands.checks.has_permissions(administrator=True)
@@ -3470,21 +3516,20 @@ async def restore_scores(interaction: discord.Interaction, channel: str):
     ch = interaction.guild.get_channel(int(channel))
     if not ch:
         return await interaction.followup.send("⚠️ Channel олдсонгүй.")
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=120)
+    pairs = await _fetch_channel_messages(ch, cutoff)  # [(message, info), ...]
 
-    msgs = await _fetch_channel_messages(ch, cutoff)
     restored = 0
-
-    for m in msgs:
-        cmd = m.interaction.name
-        if cmd not in ["add_score", "set_match_result", "set_match_result_fountain", "set_tier"]:
+    for m, info in pairs:
+        cmd = (info.get("name") or "").lower()
+        if cmd not in ("add_score", "set_match_result", "set_match_result_fountain", "set_tier"):
             continue
 
-        uid = m.interaction.user.id
-        username = m.interaction.user.display_name
+        uid = info.get("user_id")
+        username = info.get("username") or "unknown"
 
-        # ⚙️ Regex — score/tier-ийг олон хувилбараар барина
-        # Ж: "New score: 17", "Шинэ оноо: 17", "Оноо: 17"
+        # ↙️ энд танай reply форматад таарсан regex хэвээр
         score_match = re.search(r"(New score|Шинэ\s*оноо|Оноо)\s*[:：]\s*(\-?\d+)", m.content, re.I)
         tier_match  = re.search(r"(Tier|Тир|Түвшин)\s*[:：]\s*([A-Za-z0-9\-]+)", m.content, re.I)
 
@@ -3499,11 +3544,8 @@ async def restore_scores(interaction: discord.Interaction, channel: str):
 
     await interaction.followup.send(f"✅ {ch.mention} дотор {restored} тоглогчийн оноо сэргээгдлээ.")
 
-@restore_scores.autocomplete('channel')
-async def restore_scores_channel_ac(interaction: discord.Interaction, current: str):
-    return await _channel_choices(interaction.guild, current)
 
-# ---------- DONATORS ----------
+# --- /restore_donators (interaction_metadata ашигладаг болгов) ---------------
 @bot.tree.command(name="restore_donators", description="Сонгосон channel-оос донаторын өгөгдлийг сэргээнэ")
 @app_commands.describe(channel="Ямар channel-оос сэргээх вэ? (autocomplete)")
 @app_commands.checks.has_permissions(administrator=True)
@@ -3512,17 +3554,18 @@ async def restore_donators(interaction: discord.Interaction, channel: str):
     ch = interaction.guild.get_channel(int(channel))
     if not ch:
         return await interaction.followup.send("⚠️ Channel олдсонгүй.")
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=120)
+    pairs = await _fetch_channel_messages(ch, cutoff)
 
-    msgs = await _fetch_channel_messages(ch, cutoff)
     restored = 0
-
-    for m in msgs:
-        if m.interaction.name != "add_donator":
+    for m, info in pairs:
+        cmd = (info.get("name") or "").lower()
+        if cmd != "add_donator":
             continue
 
-        uid = m.interaction.user.id
-        # Мөнгөн дүнг барина: "20,000", "20000₮", "20.000"
+        uid = info.get("user_id")
+
         amt_match = re.search(r"(\d[\d,\.]*)", m.content)
         amount = int(amt_match.group(1).replace(",", "").replace(".", "")) if amt_match else 0
 
@@ -3530,10 +3573,10 @@ async def restore_donators(interaction: discord.Interaction, channel: str):
             await upsert_donator(uid, amount)
             restored += 1
         except Exception as e:
-            print(f"❌ upsert_donator алдаа uid={uid}: {e}")
+            print(f"❌ upsert_dонатор алдаа uid={uid}: {e}")
 
     await interaction.followup.send(f"💖 {ch.mention} дотор {restored} донатор сэргээгдлээ.")
-
+    
 @restore_donators.autocomplete('channel')
 async def restore_donators_channel_ac(interaction: discord.Interaction, current: str):
     return await _channel_choices(interaction.guild, current)
