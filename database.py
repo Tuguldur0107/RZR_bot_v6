@@ -235,6 +235,17 @@ async def get_all_donators():
         for row in rows
     }
 
+# async def upsert_donator(uid: int, mnt: int):
+#     conn = await connect()
+#     await conn.execute("""
+#         INSERT INTO donators (uid, total_mnt, last_donated)
+#         VALUES ($1, $2, NOW())
+#         ON CONFLICT (uid) DO UPDATE
+#         SET total_mnt = donators.total_mnt + $2, last_donated = NOW()
+#     """, uid, mnt)
+#     await conn.close()
+
+
 async def upsert_donator(uid: int, mnt: int):
     conn = await connect()
     await conn.execute("""
@@ -244,6 +255,7 @@ async def upsert_donator(uid: int, mnt: int):
         SET total_mnt = donators.total_mnt + $2, last_donated = NOW()
     """, uid, mnt)
     await conn.close()
+
 
 # 🛡 Donate Shields
 async def get_shields():
@@ -419,34 +431,3 @@ def get_current_teams(session_id: int):
         return [{"team_no": r[0], "members": list(r[1] or [])} for r in rows]
 
 
-# ===== Absolute restore helper (truncate + bulk insert) =====
-from datetime import datetime, timezone
-
-def _to_naive_utc(dt: datetime | None) -> datetime:
-    if dt is None:
-        return datetime.utcnow()
-    return (dt.astimezone(timezone.utc).replace(tzinfo=None)) if dt.tzinfo else dt
-
-async def replace_donators(items: list[tuple[int, int, datetime]]) -> int:
-    """
-    items: [(uid, total_mnt, last_ts), ...]
-    Бүх donators хүснэгтийг нэг мөсөн сольж тавина (single-run restore).
-    """
-    conn = await connect()
-    try:
-        async with conn.transaction():
-            await conn.execute("TRUNCATE TABLE donators")
-            inserted = 0
-            for uid, total, last_ts in items:
-                last_ts = _to_naive_utc(last_ts)
-                await conn.execute("""
-                    INSERT INTO donators (uid, total_mnt, last_donated)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (uid) DO UPDATE
-                    SET total_mnt = EXCLUDED.total_mnt,
-                        last_donated = EXCLUDED.last_donated
-                """, int(uid), int(total), last_ts)
-                inserted += 1
-            return inserted
-    finally:
-        await conn.close()

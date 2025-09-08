@@ -1190,48 +1190,33 @@ def _shorten(text: str | None, limit: int) -> str:
 
 
 
+MENTION_UID = re.compile(r"<@(\d+)>")
+AMOUNT = re.compile(r"(\d[\d,]*)")
 
-# /add_donator embed parse regex
-_DON_EMB_TITLE = re.compile(r"donator added", re.IGNORECASE)
-_MENTION_UID   = re.compile(r"<@(\d+)>")
-_AMOUNT        = re.compile(r"\(\s*\+?\s*([0-9][0-9,._ ]*)\s*(?:₮|MNT)?\s*\)")
-
-def _parse_donate_from_message(msg) -> list[tuple[int, int]]:
+def _parse_donator_message(msg):
     pairs = []
-    # 1) Embeds
-    for emb in (msg.embeds or []):
+    # Embed дээрээс хайна
+    for emb in msg.embeds or []:
         ed = emb.to_dict()
-        title = (ed.get("title") or "")
-        desc  = (ed.get("description") or "")
-        if not _DON_EMB_TITLE.search(title):
-            continue
-        uids = set(int(m.group(1)) for m in _MENTION_UID.finditer(desc))
-        if not uids and msg.mentions:
-            uids = {m.id for m in msg.mentions}
-        m = _AMOUNT.search(desc)
-        if not m:
-            continue
-        amt = int(re.sub(r"[^\d-]", "", m.group(1)) or "0")
-        for uid in uids:
-            pairs.append((int(uid), amt))
-    # 2) Fallback — текст дээр
-    if not pairs and msg.content:
-        text = msg.content
-        uids = set(int(m.group(1)) for m in _MENTION_UID.finditer(text))
-        m = _AMOUNT.search(text)
+        desc = ed.get("description") or ""
+        uids = [int(m.group(1)) for m in MENTION_UID.finditer(desc)]
+        m = AMOUNT.search(desc)
         if uids and m:
-            amt = int(re.sub(r"[^\d-]", "", m.group(1)) or "0")
+            amt = int(m.group(1).replace(",", ""))
             for uid in uids:
-                pairs.append((int(uid), amt))
+                pairs.append((uid, amt))
+    # Хэрэв embed дээр олдохгүй бол content-оос хайна
+    if not pairs and msg.content:
+        uids = [int(m.group(1)) for m in MENTION_UID.finditer(msg.content)]
+        m = AMOUNT.search(msg.content)
+        if uids and m:
+            amt = int(m.group(1).replace(",", ""))
+            for uid in uids:
+                pairs.append((uid, amt))
     return pairs
 
-def _naive_utc(dt: datetime | None) -> datetime:
-    if dt is None:
-        return datetime.utcnow()
-    return (dt.astimezone(timezone.utc).replace(tzinfo=None)) if dt.tzinfo else dt
-
-
-
+def _naive_utc(dt: datetime) -> datetime:
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 
@@ -3464,57 +3449,55 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
 
 
-
-
-@bot.tree.command(name="restore_donators_all", description="Бүх text channel-уудаас Donator бүртгэлийг сэргээнэ (админ)")
-@app_commands.describe(days="Сүүлийн хэдэн өдөрөөс хайх (default: 120, max: 365)")
+@bot.tree.command(name="restore_donators_all", description="Бүх text channel-уудаас donator лог сэргээнэ (админ)")
+@app_commands.describe(days="Сүүлийн хэдэн өдөрөөс хайх (default=120, max=365)")
 @app_commands.default_permissions(administrator=True)
 async def restore_donators_all(interaction: discord.Interaction, days: int = 120):
-    try:
-        await interaction.response.defer(thinking=True)
-    except discord.errors.InteractionResponded:
-        return
+    await interaction.response.defer(thinking=True)
 
     days = max(1, min(days, 365))
     after_dt = datetime.now(timezone.utc) - timedelta(days=days)
 
-    agg: dict[int, dict] = {}
-    checked_chans, scanned_msgs = 0, 0
+    agg = {}
+    scanned, checked = 0, 0
 
     for ch in interaction.guild.text_channels:
         perms = ch.permissions_for(interaction.guild.me)
         if not (perms.view_channel and perms.read_message_history):
             continue
-        checked_chans += 1
+        checked += 1
 
         async for msg in ch.history(limit=None, after=after_dt, oldest_first=False):
-            scanned_msgs += 1
+            scanned += 1
             if msg.author.id != bot.user.id:
                 continue
             ts = msg.created_at
             if ts and ts.tzinfo is None:
                 ts = ts.replace(tzinfo=timezone.utc)
-            for uid, amt in _parse_donate_from_message(msg):
-                cur = agg.get(uid) or {"total": 0, "last": datetime(1970,1,1)}
-                cur["total"] += max(0, int(amt))
+
+            for uid, amt in _parse_donator_message(msg):
+                cur = agg.get(uid) or {"total": 0, "last": datetime(1970, 1, 1, tzinfo=timezone.utc)}
+                cur["total"] += amt
                 if ts and ts > cur["last"]:
                     cur["last"] = ts
                 agg[uid] = cur
 
     if not agg:
-        return await interaction.followup.send(
-            f"📭 Donator лог олдсонгүй. (сүүлийн {days} өдөр, {checked_chans} суваг шалгав)"
-        )
+        return await interaction.followup.send(f"📭 Donator лог олдсонгүй (сүүлийн {days} өдөр, {checked} суваг шалгав)")
 
-    from database import replace_donators
-    rows = [(uid, data["total"], _naive_utc(data["last"])) for uid, data in agg.items() if data["total"] > 0]
-    ok = await replace_donators(rows)
+    from database import upsert_donator
+    ok = 0
+    for uid, data in agg.items():
+        try:
+            await upsert_donator(uid, data["total"])
+            ok += 1
+        except Exception as e:
+            print(f"❌ upsert_donator error {uid}: {e}")
 
     await interaction.followup.send(
-        f"✅ **{checked_chans}** сувгаас {scanned_msgs} мессеж шалгаад, "
-        f"**{ok}** donator-ыг сэргээж бичлээ. (сүүлийн {days} өдөр)"
+        f"✅ {checked} сувгаас {scanned} мессеж шалгаад, "
+        f"{ok} donator сэргээв. (сүүлийн {days} өдөр)"
     )
-# ===================== END RESTORE DONATORS =====================
 
 
 
