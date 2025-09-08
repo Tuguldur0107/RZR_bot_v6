@@ -1183,52 +1183,6 @@ def _shorten(text: str | None, limit: int) -> str:
     return (s[:max(0, limit - 1)] + "…") if len(s) > limit else s
 
 
-
-
-
-
-
-
-
-MENTION_UID = re.compile(r"<@(\d+)>")
-AMOUNT = re.compile(r"(\d[\d,]*)")
-
-def _parse_donator_message(msg):
-    pairs = []
-    # Embed дээрээс хайна
-    for emb in msg.embeds or []:
-        ed = emb.to_dict()
-        desc = ed.get("description") or ""
-        uids = [int(m.group(1)) for m in MENTION_UID.finditer(desc)]
-        m = AMOUNT.search(desc)
-        if uids and m:
-            amt = int(m.group(1).replace(",", ""))
-            for uid in uids:
-                pairs.append((uid, amt))
-    # Хэрэв embed дээр олдохгүй бол content-оос хайна
-    if not pairs and msg.content:
-        uids = [int(m.group(1)) for m in MENTION_UID.finditer(msg.content)]
-        m = AMOUNT.search(msg.content)
-        if uids and m:
-            amt = int(m.group(1).replace(",", ""))
-            for uid in uids:
-                pairs.append((uid, amt))
-    return pairs
-
-def _naive_utc(dt: datetime) -> datetime:
-    return dt.astimezone(timezone.utc).replace(tzinfo=None)
-
-
-
-
-
-
-
-
-
-
-
-
 # 🧬 Start
 @bot.event
 async def on_ready():
@@ -3441,67 +3395,6 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
     emb.set_footer(text=("Seed: {}".format(seed) if seed is not None else "Random every time"))
     await interaction.followup.send(embed=emb)
-
-
-
-
-
-
-
-
-@bot.tree.command(name="restore_donators_all", description="Бүх text channel-уудаас donator лог сэргээнэ (админ)")
-@app_commands.describe(days="Сүүлийн хэдэн өдөрөөс хайх (default=120, max=365)")
-@app_commands.default_permissions(administrator=True)
-async def restore_donators_all(interaction: discord.Interaction, days: int = 120):
-    await interaction.response.defer(thinking=True)
-
-    days = max(1, min(days, 365))
-    after_dt = datetime.now(timezone.utc) - timedelta(days=days)
-
-    agg = {}
-    scanned, checked = 0, 0
-
-    for ch in interaction.guild.text_channels:
-        perms = ch.permissions_for(interaction.guild.me)
-        if not (perms.view_channel and perms.read_message_history):
-            continue
-        checked += 1
-
-        async for msg in ch.history(limit=None, after=after_dt, oldest_first=False):
-            scanned += 1
-            if msg.author.id != bot.user.id:
-                continue
-            ts = msg.created_at
-            if ts and ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-
-            for uid, amt in _parse_donator_message(msg):
-                cur = agg.get(uid) or {"total": 0, "last": datetime(1970, 1, 1, tzinfo=timezone.utc)}
-                cur["total"] += amt
-                if ts and ts > cur["last"]:
-                    cur["last"] = ts
-                agg[uid] = cur
-
-    if not agg:
-        return await interaction.followup.send(f"📭 Donator лог олдсонгүй (сүүлийн {days} өдөр, {checked} суваг шалгав)")
-
-    from database import upsert_donator
-    ok = 0
-    for uid, data in agg.items():
-        try:
-            await upsert_donator(uid, data["total"])
-            ok += 1
-        except Exception as e:
-            print(f"❌ upsert_donator error {uid}: {e}")
-
-    await interaction.followup.send(
-        f"✅ {checked} сувгаас {scanned} мессеж шалгаад, "
-        f"{ok} donator сэргээв. (сүүлийн {days} өдөр)"
-    )
-
-
-
-
 
 
 

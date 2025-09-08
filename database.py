@@ -235,17 +235,6 @@ async def get_all_donators():
         for row in rows
     }
 
-# async def upsert_donator(uid: int, mnt: int):
-#     conn = await connect()
-#     await conn.execute("""
-#         INSERT INTO donators (uid, total_mnt, last_donated)
-#         VALUES ($1, $2, NOW())
-#         ON CONFLICT (uid) DO UPDATE
-#         SET total_mnt = donators.total_mnt + $2, last_donated = NOW()
-#     """, uid, mnt)
-#     await conn.close()
-
-
 async def upsert_donator(uid: int, mnt: int):
     conn = await connect()
     await conn.execute("""
