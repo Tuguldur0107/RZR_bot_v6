@@ -420,10 +420,17 @@ def get_current_teams(session_id: int):
 
 
 # ===== Absolute restore helper (truncate + bulk insert) =====
+from datetime import datetime, timezone
+
+def _to_naive_utc(dt: datetime | None) -> datetime:
+    if dt is None:
+        return datetime.utcnow()
+    return (dt.astimezone(timezone.utc).replace(tzinfo=None)) if dt.tzinfo else dt
+
 async def replace_donators(items: list[tuple[int, int, datetime]]) -> int:
     """
     items: [(uid, total_mnt, last_ts), ...]
-    Бүх donators хүснэгтийг *нэг мөсөн* сольж тавина (single-run restore).
+    Бүх donators хүснэгтийг нэг мөсөн сольж тавина (single-run restore).
     """
     conn = await connect()
     try:
@@ -431,12 +438,14 @@ async def replace_donators(items: list[tuple[int, int, datetime]]) -> int:
             await conn.execute("TRUNCATE TABLE donators")
             inserted = 0
             for uid, total, last_ts in items:
+                last_ts = _to_naive_utc(last_ts)
                 await conn.execute("""
                     INSERT INTO donators (uid, total_mnt, last_donated)
                     VALUES ($1, $2, $3)
                     ON CONFLICT (uid) DO UPDATE
-                    SET total_mnt = EXCLUDED.total_mnt, last_donated = EXCLUDED.last_donated
-                """, int(uid), int(total), last_ts or datetime.now(timezone.utc))
+                    SET total_mnt = EXCLUDED.total_mnt,
+                        last_donated = EXCLUDED.last_donated
+                """, int(uid), int(total), last_ts)
                 inserted += 1
             return inserted
     finally:

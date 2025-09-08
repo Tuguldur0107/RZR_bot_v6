@@ -1191,57 +1191,44 @@ def _shorten(text: str | None, limit: int) -> str:
 
 
 
-# /add_donator хариуны формат:
-#  - Embed.title: "🎉 Donator Added"
-#  - Embed.description эсвэл текст: "<@123456> хандив өглөө! (+10,000₮)"
-#  - Файл хавсаргасан байж болно (donator.png)
+# /add_donator embed parse regex
 _DON_EMB_TITLE = re.compile(r"donator added", re.IGNORECASE)
 _MENTION_UID   = re.compile(r"<@(\d+)>")
 _AMOUNT        = re.compile(r"\(\s*\+?\s*([0-9][0-9,._ ]*)\s*(?:₮|MNT)?\s*\)")
 
 def _parse_donate_from_message(msg) -> list[tuple[int, int]]:
-    """
-    Ботын нэг хариунаас [(uid, amount_mnt), ...] жагсаалт гаргаж авна.
-    Одоогоор нэг UID нэг дүнтэй байдаг ч хамгаалалттай байя.
-    """
     pairs = []
-
     # 1) Embeds
     for emb in (msg.embeds or []):
         ed = emb.to_dict()
         title = (ed.get("title") or "")
-        desc  = (ed.get("description") or "")  # "… хандив өглөө! (+10,000₮)"
+        desc  = (ed.get("description") or "")
         if not _DON_EMB_TITLE.search(title):
             continue
-
-        # UID
         uids = set(int(m.group(1)) for m in _MENTION_UID.finditer(desc))
         if not uids and msg.mentions:
             uids = {m.id for m in msg.mentions}
-
-        # Amount
         m = _AMOUNT.search(desc)
         if not m:
             continue
         amt = int(re.sub(r"[^\d-]", "", m.group(1)) or "0")
-
         for uid in uids:
-            pairs.append((int(uid), int(amt)))
-
-    # 2) Fallback — зөвхөн текст илгээсэн тохиолдол
-    if not pairs:
-        text = msg.content or ""
-        if text:
-            uids = set(int(m.group(1)) for m in _MENTION_UID.finditer(text))
-            m = _AMOUNT.search(text)
-            if uids and m:
-                amt = int(re.sub(r"[^\d-]", "", m.group(1)) or "0")
-                for uid in uids:
-                    pairs.append((int(uid), int(amt)))
-
+            pairs.append((int(uid), amt))
+    # 2) Fallback — текст дээр
+    if not pairs and msg.content:
+        text = msg.content
+        uids = set(int(m.group(1)) for m in _MENTION_UID.finditer(text))
+        m = _AMOUNT.search(text)
+        if uids and m:
+            amt = int(re.sub(r"[^\d-]", "", m.group(1)) or "0")
+            for uid in uids:
+                pairs.append((int(uid), amt))
     return pairs
 
-
+def _naive_utc(dt: datetime | None) -> datetime:
+    if dt is None:
+        return datetime.utcnow()
+    return (dt.astimezone(timezone.utc).replace(tzinfo=None)) if dt.tzinfo else dt
 
 
 
@@ -3477,6 +3464,8 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
 
 
+
+
 @bot.tree.command(name="restore_donators_all", description="Бүх text channel-уудаас Donator бүртгэлийг сэргээнэ (админ)")
 @app_commands.describe(days="Сүүлийн хэдэн өдөрөөс хайх (default: 120, max: 365)")
 @app_commands.default_permissions(administrator=True)
@@ -3489,10 +3478,8 @@ async def restore_donators_all(interaction: discord.Interaction, days: int = 120
     days = max(1, min(days, 365))
     after_dt = datetime.now(timezone.utc) - timedelta(days=days)
 
-    # Нэгтгэл: uid -> {"total": сум, "last": хамгийн сүүлийн ts}
     agg: dict[int, dict] = {}
-    checked_chans = 0
-    scanned_msgs  = 0
+    checked_chans, scanned_msgs = 0, 0
 
     for ch in interaction.guild.text_channels:
         perms = ch.permissions_for(interaction.guild.me)
@@ -3504,13 +3491,11 @@ async def restore_donators_all(interaction: discord.Interaction, days: int = 120
             scanned_msgs += 1
             if msg.author.id != bot.user.id:
                 continue
-
             ts = msg.created_at
             if ts and ts.tzinfo is None:
                 ts = ts.replace(tzinfo=timezone.utc)
-
             for uid, amt in _parse_donate_from_message(msg):
-                cur = agg.get(uid) or {"total": 0, "last": datetime(1970,1,1, tzinfo=timezone.utc)}
+                cur = agg.get(uid) or {"total": 0, "last": datetime(1970,1,1)}
                 cur["total"] += max(0, int(amt))
                 if ts and ts > cur["last"]:
                     cur["last"] = ts
@@ -3521,23 +3506,15 @@ async def restore_donators_all(interaction: discord.Interaction, days: int = 120
             f"📭 Donator лог олдсонгүй. (сүүлийн {days} өдөр, {checked_chans} суваг шалгав)"
         )
 
-    # DB-д абсолют утгаар суулгах (TRUNCATE+INSERT)
-    from database import replace_donators  # доорх 2-р хэсэгт нэмнэ
-    rows = [(uid, data["total"], data["last"]) for uid, data in agg.items() if data["total"] > 0]
-    ok = 0
-    try:
-        ok = await replace_donators(rows)
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return await interaction.followup.send(f"❌ DB-д бичих үед алдаа гарлаа: {e}")
+    from database import replace_donators
+    rows = [(uid, data["total"], _naive_utc(data["last"])) for uid, data in agg.items() if data["total"] > 0]
+    ok = await replace_donators(rows)
 
     await interaction.followup.send(
         f"✅ **{checked_chans}** сувгаас {scanned_msgs} мессеж шалгаад, "
         f"**{ok}** donator-ыг сэргээж бичлээ. (сүүлийн {days} өдөр)"
     )
 # ===================== END RESTORE DONATORS =====================
-
-
 
 
 
