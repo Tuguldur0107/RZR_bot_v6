@@ -7,6 +7,8 @@ from datetime import datetime, timezone, timedelta
 import unicodedata
 import re
 
+from collections import defaultdict
+
 # 🌿 Third-party modules
 import discord
 from discord import app_commands, Embed
@@ -1199,80 +1201,59 @@ def _shorten(text: str | None, limit: int) -> str:
 
 
 
-# ---------- Autocomplete (25 хүртэл channel) ----------
-async def _channel_choices(guild, current: str):
-    # нэрээр нь шүүж, 25 хүргээд буцаана
-    cur = (current or "").lower()
-    chans = []
-    for ch in guild.text_channels:
-        if not cur or cur in ch.name.lower():
-            chans.append(ch)
-        if len(chans) >= 25:
-            break
-    # нэр + id-г харуулж, value-д id-г өгнө
-    return [
-        app_commands.Choice(name=f"#{ch.name}", value=str(ch.id))
-        for ch in chans
-    ]
+# ==== ТУСЛАХ: interaction metadata-г найдвартай авах =========================
+def _extract_interaction(m: discord.Message):
+    """
+    Discord API v10+: message.interaction (deprecated) -> message.interaction_metadata
+    Аль алиныг нь дэмжиж:
+      - командын нэр
+      - хэрэглэгчийн id / нэр
+    -ийг буцаана. Олдохгүй бол None
+    """
+    meta = getattr(m, "interaction_metadata", None) or getattr(m, "interaction", None)
+    if not meta:
+        return None
+    user = getattr(meta, "user", None)
+    return {
+        "name": (getattr(meta, "name", None) or getattr(meta, "command_name", None) or "").lower(),
+        "uid": getattr(user, "id", None) if user else None,
+        "username": (getattr(user, "display_name", None) or getattr(user, "name", None) or "unknown") if user else "unknown"
+    }
 
-# 🛠 Utility: Guild-ийн бүх текст channel-уудаас мессеж fetch хийдэг
-async def _fetch_all_messages(guild, cutoff: datetime):
-    msgs = []
-    for ch in guild.text_channels:
-        try:
-            async for m in ch.history(limit=None, after=cutoff):
-                if m.author.bot and m.interaction:  # зөвхөн ботын хариу + командтай
-                    msgs.append(m)
-        except Exception as e:
-            print(f"⚠️ Channel ухахад алдаа #{ch.name}: {e}")
-    return msgs
+# ==== ТУСЛАХ: content + бүх embed текстийг нэгтгэж авах ======================
+def _message_text(m: discord.Message) -> str:
+    """
+    content + embed.title/description/fields/footer-г нэг мөр болгон буцаана.
+    Зарим командын үр дүн зөвхөн embed-д байж болдог тул энэ нь зайлшгүй.
+    """
+    parts = [m.content or ""]
+    for e in (m.embeds or []):
+        if e.title: parts.append(str(e.title))
+        if e.description: parts.append(str(e.description))
+        for f in (getattr(e, "fields", []) or []):
+            parts.append(f"{f.name}: {f.value}")
+        if e.footer and getattr(e.footer, "text", None):
+            parts.append(str(e.footer.text))
+    return "\n".join(p for p in parts if p)
 
-# --- CHANNEL УХАХ ФУНКЦ (шинэчлэгдсэн шалгалттай) ---------------------------
-async def _fetch_channel_messages(ch, cutoff):
-    msgs = []
+# ==== ТУСЛАХ: сонгосон channel-аас хугацааны огтлолцоор ухах =================
+async def _fetch_channel_pairs(ch: discord.TextChannel, cutoff: datetime):
+    """
+    Сонгосон сувгаас cutoff-оос хойших бүх ботын reply (slash interaction-той) мессежийг
+    [(message, info)] хосоор буцаана.
+    """
+    pairs = []
     try:
         async for m in ch.history(limit=None, after=cutoff, oldest_first=True):
             if not m.author.bot:
                 continue
             info = _extract_interaction(m)
-            if info is None:
+            if not info:
                 continue
-            msgs.append((m, info))  # мессеж + interaction info хосоор нь хадгална
+            pairs.append((m, info))
     except Exception as e:
         print(f"⚠️ Channel ухахад алдаа #{ch.name}: {e}")
-    return msgs
-
-
-# --- НЭМЭЛТ ТУСЛАХ ФУНКЦ -----------------------------------------------------
-def _extract_interaction(m):
-    """
-    Discord API v10: message.interaction (deprecated) -> message.interaction_metadata
-    Энэ функц хуучин/шинэ хэлбэрийг хоёуланг нь дэмжээд:
-      - command name
-      - user id / username
-    -ийг буцаана.
-    """
-    meta = getattr(m, "interaction_metadata", None)
-    if meta is None:
-        meta = getattr(m, "interaction", None)
-    if meta is None:
-        return None
-
-    # user
-    user = getattr(meta, "user", None)
-    user_id = getattr(user, "id", None) if user else None
-    username = getattr(user, "display_name", None) or getattr(user, "name", None)
-
-    # командын нэр
-    # discord.py-ийн хувилбараас шалтгаалаад .name эсвэл .command_name гэж байж болно
-    cmd_name = getattr(meta, "name", None) or getattr(meta, "command_name", None)
-
-    return {
-        "user_id": user_id,
-        "username": username,
-        "name": cmd_name,
-        "raw": meta,
-    }
+    return pairs
 
 
 
@@ -3507,79 +3488,109 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
 
 
-# --- /restore_scores (interaction_metadata ашигладаг болгов) -----------------
+# =============================================================================
+# /restore_scores — оноо + tier сэргээх (content + embed аль алинаас уншина)
+# =============================================================================
 @bot.tree.command(name="restore_scores", description="Сонгосон channel-оос онооны өгөгдлийг сэргээнэ")
-@app_commands.describe(channel="Ямар channel-оос сэргээх вэ? (autocomplete)")
+@app_commands.describe(
+    channel="Ямар channel-оос сэргээх вэ? (picker-ээс сонгоно)",
+    days="Хэдэн өдрийг ухах вэ? (default: 120)"
+)
 @app_commands.checks.has_permissions(administrator=True)
-async def restore_scores(interaction: discord.Interaction, channel: str):
+async def restore_scores(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    days: int = 120
+):
     await interaction.response.defer(thinking=True)
-    ch = interaction.guild.get_channel(int(channel))
-    if not ch:
-        return await interaction.followup.send("⚠️ Channel олдсонгүй.")
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    pairs = await _fetch_channel_messages(ch, cutoff)  # [(message, info), ...]
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+    pairs = await _fetch_channel_pairs(channel, cutoff)
 
     restored = 0
     for m, info in pairs:
-        cmd = (info.get("name") or "").lower()
+        cmd = info["name"]
         if cmd not in ("add_score", "set_match_result", "set_match_result_fountain", "set_tier"):
             continue
 
-        uid = info.get("user_id")
-        username = info.get("username") or "unknown"
+        uid = info["uid"]
+        username = info["username"]
+        text = _message_text(m)
 
-        # ↙️ энд танай reply форматад таарсан regex хэвээр
-        score_match = re.search(r"(New score|Шинэ\s*оноо|Оноо)\s*[:：]\s*(\-?\d+)", m.content, re.I)
-        tier_match  = re.search(r"(Tier|Тир|Түвшин)\s*[:：]\s*([A-Za-z0-9\-]+)", m.content, re.I)
+        # ---- SCORE & TIER-ийг олон хувилбар барих regex ----
+        # Жишээ хэлбэрүүд:
+        #  - "New score: 17" / "Шинэ оноо: 17" / "Оноо: 17"
+        #  - "Tier: 4-1" / "Түвшин: 4-1" / "Тир: 4-1"
+        score_match = re.search(r"(New\s*score|Шинэ\s*оноо|Оноо)\s*[:：]\s*(-?\d+)", text, re.I)
+        tier_match  = re.search(r"(Tier|Түвшин|Тир)\s*[:：]\s*([A-Za-z0-9\-]+)", text, re.I)
 
         score = int(score_match.group(2)) if score_match else 0
         tier  = tier_match.group(2) if tier_match else "4-1"
 
         try:
+            # 👉 Танай кодонд байдаг upsert_score(uid, score, tier, username) функцыг дуудах
             await upsert_score(uid, score, tier, username)
             restored += 1
         except Exception as e:
             print(f"❌ upsert_score алдаа uid={uid}: {e}")
 
-    await interaction.followup.send(f"✅ {ch.mention} дотор {restored} тоглогчийн оноо сэргээгдлээ.")
+    await interaction.followup.send(
+        f"✅ {channel.mention} дотор {restored} тоглогчийн оноо сэргээгдлээ. (сүүлийн {days} өдөр)"
+    )
 
-
-# --- /restore_donators (interaction_metadata ашигладаг болгов) ---------------
+# =============================================================================
+# /restore_donators — донаторуудыг сэргээх (content + embed-ээс уншаад UID-аар нэгтгэнэ)
+# =============================================================================
 @bot.tree.command(name="restore_donators", description="Сонгосон channel-оос донаторын өгөгдлийг сэргээнэ")
-@app_commands.describe(channel="Ямар channel-оос сэргээх вэ? (autocomplete)")
+@app_commands.describe(
+    channel="Ямар channel-оос сэргээх вэ? (picker-ээс сонгоно)",
+    days="Хэдэн өдрийг ухах вэ? (default: 120)"
+)
 @app_commands.checks.has_permissions(administrator=True)
-async def restore_donators(interaction: discord.Interaction, channel: str):
+async def restore_donators(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    days: int = 120
+):
     await interaction.response.defer(thinking=True)
-    ch = interaction.guild.get_channel(int(channel))
-    if not ch:
-        return await interaction.followup.send("⚠️ Channel олдсонгүй.")
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    pairs = await _fetch_channel_messages(ch, cutoff)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+    pairs = await _fetch_channel_pairs(channel, cutoff)
 
-    restored = 0
+    # UID-аар агрегатлана: нэг донор олон удаа хандивласан бол нийлбэрлэнэ
+    totals = defaultdict(lambda: {"amount": 0, "last_ts": datetime.min.replace(tzinfo=timezone.utc)})
+
     for m, info in pairs:
-        cmd = (info.get("name") or "").lower()
-        if cmd != "add_donator":
+        if info["name"] != "add_donator":
             continue
 
-        uid = info.get("user_id")
+        uid = info["uid"]
+        text = _message_text(m)
 
-        amt_match = re.search(r"(\d[\d,\.]*)", m.content)
-        amount = int(amt_match.group(1).replace(",", "").replace(".", "")) if amt_match else 0
+        # Мөнгөн дүн барих: 20,000 / 20000₮ / 20.000 — бүгдийг тоо болгоно
+        m1 = re.search(r"(\d[\d,\.]*)", text)
+        if not m1:
+            continue
+        amount = int(m1.group(1).replace(",", "").replace(".", ""))
 
+        totals[uid]["amount"] += amount
+        if m.created_at and m.created_at > totals[uid]["last_ts"]:
+            totals[uid]["last_ts"] = m.created_at
+
+    restored = 0
+    for uid, v in totals.items():
         try:
-            await upsert_donator(uid, amount)
+            # 👉 Танай upsert_donator(uid, amount) нь ихэнхдээ “НЭМЭХ” логиктой.
+            # Нэг UID-ийн нийлбэрийг нэг дор оруулна.
+            await upsert_donator(uid, v["amount"])
             restored += 1
         except Exception as e:
-            print(f"❌ upsert_dонатор алдаа uid={uid}: {e}")
+            print(f"❌ upsert_donator uid={uid} алдаа: {e}")
 
-    await interaction.followup.send(f"💖 {ch.mention} дотор {restored} донатор сэргээгдлээ.")
-
-@restore_donators.autocomplete('channel')
-async def restore_donators_channel_ac(interaction: discord.Interaction, current: str):
-    return await _channel_choices(interaction.guild, current)
+    await interaction.followup.send(
+        f"💖 {channel.mention} дотор {restored} донатор сэргээгдлээ. (сүүлийн {days} өдөр)\n"
+        f"ℹ️ Нэг UID олон удаа хандивласан тохиолдолд **нийлбэрлэж** бичсэн."
+    )
 
 
 
