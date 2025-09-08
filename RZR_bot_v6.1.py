@@ -1200,28 +1200,23 @@ def _shorten(text: str | None, limit: int) -> str:
 
 
 
-
-# ---------- Regex-үүд: олон хэлбэр барих ----------
+# -------- Regex-үүд --------
 MENTION_RE = re.compile(r"<@!?(?P<uid>\d+)>")
 AMOUNT_RE  = re.compile(r"(?<!\d)(\d{1,3}(?:[ ,.]?\d{3})+|\d+)(?=\s*(?:₮|MNT|mnt)?\b)")
 SCORE_RE   = re.compile(r"(?:new\s*score|шинэ\s*оноо|оноо)\s*[:：]?\s*(-?\d+)", re.I)
 TIER_RE    = re.compile(r"(?:tier|түвшин|тир)\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9\-]*)", re.I)
-ARROW_RE   = re.compile(r"→\s*(-?\d+)")  # ж: “→ 17”
+ARROW_RE   = re.compile(r"→\s*(-?\d+)")  # “→ 17” хувилбар
 
-# ---------- interaction metadata-г аюулгүй авах ----------
+# -------- Interaction / текст нэгтгэх --------
 def _ix_info(m: discord.Message):
     meta = getattr(m, "interaction_metadata", None) or getattr(m, "interaction", None)
-    if not meta:
-        return None
+    if not meta: return None
     user = getattr(meta, "user", None)
     name = getattr(meta, "name", None) or getattr(meta, "command_name", None) or ""
-    return {
-        "cmd": name.lower(),
-        "invoker_id": getattr(user, "id", None) if user else None,
-        "invoker_name": (getattr(user, "display_name", None) or getattr(user, "name", None) or "unknown") if user else "unknown",
-    }
+    return {"cmd": name.lower(),
+            "invoker_id": getattr(user, "id", None) if user else None,
+            "invoker_name": (getattr(user, "display_name", None) or getattr(user, "name", None) or "unknown") if user else "unknown"}
 
-# ---------- content + EMBED (title/desc/fields/footer)-ийг нэгтгэх ----------
 def _full_text(m: discord.Message) -> str:
     parts = [m.content or ""]
     for e in (m.embeds or []):
@@ -1233,97 +1228,77 @@ def _full_text(m: discord.Message) -> str:
             parts.append(str(e.footer.text))
     return "\n".join(p for p in parts if p)
 
-# ---------- channel-н түүхийг (cutoff-с хойш) ачаалалтайгаар унших ----------
-async def _scan_channel(ch: discord.TextChannel, cutoff: datetime):
+# -------- Channel түүх унших --------
+async def _scan_channel(ch: discord.TextChannel, cutoff: datetime, require_interaction: bool) -> list[tuple[discord.Message, dict|None]]:
     pairs = []
     try:
         async for m in ch.history(limit=None, after=cutoff, oldest_first=True):
             if not m.author.bot:
                 continue
             info = _ix_info(m)
-            if not info:
+            if require_interaction and not info:
                 continue
             pairs.append((m, info))
     except Exception as e:
         print(f"⚠️ #{ch.name} ухахад алдаа: {e}")
     return pairs
 
-# ---------- Мөр бүрээс mention-ууд + тоонуудыг холбоод унших туслахууд ----------
-def _parse_donations(text: str, bot_id: int | None = None):
-    """
-    Нэг мессежээс олон донорыг ч дэмжинэ:
-    mention-тэй мөр бүр дээрх хамгийн ойр мөнгөн дүнг тухайн mention-д холбож буцаана.
-    Буцаалт: [(uid:int, amount:int)]
-    """
-    results = []
+def _parse_donations(text: str, bot_id: int | None = None) -> list[tuple[int, int]]:
+    rows = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
-        if not line:
-            continue
+        if not line: continue
         ments = list(MENTION_RE.finditer(line))
-        if not ments:
-            continue
+        if not ments: continue
         amts = list(AMOUNT_RE.finditer(line))
-        # мөрөнд олон дүн байвал эхнийхийг авна (ихэнхдээ 1)
-        amt = None
-        if amts:
-            amt = int(amts[0].group(1).replace(",", "").replace(".", ""))
+        amt = int(amts[0].group(1).replace(",", "").replace(".", "")) if amts else None
         for m in ments:
             uid = int(m.group("uid"))
-            if bot_id and uid == bot_id:
+            if bot_id and uid == bot_id:  # өөрийгөө тооцохгүй
                 continue
             if amt is not None:
-                results.append((uid, amt))
-    return results
+                rows.append((uid, amt))
+    return rows
 
-def _parse_scores_block(text: str, default_tier="4-1"):
-    """
-    Нэг мессежээс олон тоглогчийн state-г уншина.
-    Буцаалт: dict[uid] = {"score": int|None, "tier": str|None}
-    """
-    out = {}
+def _parse_scores_block(text: str, default_tier="4-1") -> dict[int, dict]:
+    out: dict[int, dict] = {}
     for raw_line in text.splitlines():
         line = raw_line.strip()
-        if not line:
-            continue
+        if not line: continue
         ment = MENTION_RE.search(line)
-        if not ment:
-            continue
+        if not ment: continue
         uid = int(ment.group("uid"))
         score = None
-        tier = None
-
+        tier  = None
         s = SCORE_RE.search(line) or ARROW_RE.search(line)
         if s:
             try: score = int(s.group(1))
             except: pass
-
         t = TIER_RE.search(line)
-        if t:
-            tier = t.group(1)
-
+        if t: tier = t.group(1)
         if (score is not None) or tier:
             cur = out.get(uid, {})
             cur["score"] = score if score is not None else cur.get("score")
-            cur["tier"] = tier if tier else cur.get("tier", default_tier)
+            cur["tier"]  = tier  if tier  else cur.get("tier", default_tier)
             out[uid] = cur
     return out
 
-# ---------- Гишүүний нэр авах (кэштэй) ----------
+# -------- Username кэш --------
 _member_cache: dict[int, str] = {}
 async def _username_for(guild: discord.Guild, uid: int) -> str:
     if uid in _member_cache:
         return _member_cache[uid]
     m = guild.get_member(uid)
     if not m:
-        try:
-            m = await guild.fetch_member(uid)
-        except Exception:
-            _member_cache[uid] = str(uid)
-            return _member_cache[uid]
+        try: m = await guild.fetch_member(uid)
+        except: _member_cache[uid] = str(uid); return _member_cache[uid]
     _member_cache[uid] = (m.display_name or m.name)
     return _member_cache[uid]
 
+def _target_channels(guild: discord.Guild, channel: Optional[discord.TextChannel], all_channels: bool) -> Iterable[discord.TextChannel]:
+    if all_channels or channel is None:
+        return list(guild.text_channels)
+    return [channel]
 
 
 
@@ -3577,112 +3552,149 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
 
 # =============================================================================
-# /restore_donators — embed/текстээс донорыг мөр тус бүрээр уншаад UID-аар нэгтгэнэ
+# DONATORS
 # =============================================================================
-@bot.tree.command(name="restore_donators", description="Тодорхой channel-оос сүүлийн N хоногийн донатыг сэргээх")
-@app_commands.describe(channel="Ямар channel-оос сэргээх вэ?", days="Хайх хоногийн тоо (1-180)")
+@bot.tree.command(name="restore_donators", description="Донаторын датаг сэргээх (embed+content, олон суваг дэмжинэ)")
+@app_commands.describe(
+    channel="Ямар channel-оос сэргээх вэ? (хоосон бол бүх text channel)",
+    days="Хайх хоног (1–180)",
+    replace="DB-г бүрэн цэвэрлээд шинээр бичих үү?",
+    all_channels="Бүх текст channel-уудыг уух уу? (channel-ыг үл тооно)"
+)
 @app_commands.checks.has_permissions(administrator=True)
 async def restore_donators(
     interaction: discord.Interaction,
-    channel: discord.TextChannel,
-    days: app_commands.Range[int, 1, 180] = 120
+    channel: Optional[discord.TextChannel] = None,
+    days: app_commands.Range[int, 1, 180] = 120,
+    replace: bool = False,
+    all_channels: bool = False
 ):
     await interaction.response.defer(thinking=True)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-    pairs = await _scan_channel(channel, cutoff)
     totals = defaultdict(lambda: {"amount": 0, "last_ts": datetime.min.replace(tzinfo=timezone.utc)})
-
     bot_id = interaction.client.user.id if interaction.client and interaction.client.user else None
 
-    for m, info in pairs:
-        # зөвхөн add_donator команд (interaction.name) — гэхдээ зарим хуучин лог дээр нэр нь дутсан байж магадгүй
-        if info["cmd"] and info["cmd"] != "add_donator":
-            continue
+    for ch in _target_channels(interaction.guild, channel, all_channels):
+        pairs = await _scan_channel(ch, cutoff, require_interaction=False)  # ← interaction шаардахгүй
+        for m, info in pairs:
+            # interaction name нь add_donator биш байсан ч (хуучин лог) текст/эмбед дээр mention+дүн байвал уншина
+            text = _full_text(m)
+            rows = _parse_donations(text, bot_id=bot_id) or _parse_donations(m.content or "", bot_id=bot_id)
+            for uid, amt in rows:
+                totals[uid]["amount"] += amt
+                if m.created_at and m.created_at > totals[uid]["last_ts"]:
+                    totals[uid]["last_ts"] = m.created_at
+        await asyncio.sleep(0.3)  # rate-limit амьсгаа
 
-        text = _full_text(m)
-        found = _parse_donations(text, bot_id=bot_id)
-        if not found:
-            # fallback: бүх message дээр mention + amount хоёул байна уу гэдгийг дахин шалгана
-            found = _parse_donations(m.content or "", bot_id=bot_id)
-
-        for uid, amt in found:
-            totals[uid]["amount"] += amt
-            if m.created_at and m.created_at > totals[uid]["last_ts"]:
-                totals[uid]["last_ts"] = m.created_at
-
-    # DB-руу шингээх
     restored = 0
-    for uid, v in totals.items():
+    if replace:
+        conn = await db()
         try:
-            # Танай талд байгаа upsert_donator(uid, amount) нь нийт дүнг нэмж хадгалдаг гэж үзэж байна
-            await upsert_donator(uid, v["amount"])
-            restored += 1
-        except Exception as e:
-            print(f"❌ upsert_donator uid={uid} алдаа: {e}")
+            async with conn.transaction():
+                await conn.execute("TRUNCATE public.donators RESTART IDENTITY")
+                if totals:
+                    await conn.executemany("""
+                        INSERT INTO public.donators (uid, total_mnt, last_donated, updated_at)
+                        VALUES ($1, $2, $3, now())
+                    """, [(int(uid), int(v["amount"]), v["last_ts"]) for uid, v in totals.items()])
+                    restored = len(totals)
+        finally:
+            await conn.close()
+    else:
+        # upsert функцээр нэмэгдүүлнэ
+        for uid, v in totals.items():
+            try:
+                await upsert_donator(int(uid), int(v["amount"]))
+                restored += 1
+            except Exception as e:
+                print(f"❌ upsert_donator uid={uid}: {e}")
 
+    scope = "бүх сувгаас" if (all_channels or channel is None) else channel.mention
     await interaction.followup.send(
-        f"💖 {channel.mention} дотор **{restored} донор** сэргээв. (сүүлийн {days} өдөр)\n"
-        f"ℹ️ Мессеж бүрийн mention+дүнг холбож UID-аар **нийлбэрлэж** бичсэн."
+        f"💖 {scope} **{restored} донор** сэргээв. (сүүлийн {days} өдөр)"
+        + (" **[FULL REPLACE]**" if replace else "")
     )
 
 # =============================================================================
-# /restore_scores — add_score / set_match_result(_fountain) / set_tier-ээс state-г сэргээх
+# SCORES
 # =============================================================================
-@bot.tree.command(name="restore_scores", description="Тодорхой channel-оос сүүлийн N хоногийн оноо/түйрийг сэргээх")
-@app_commands.describe(channel="Ямар channel-оос сэргээх вэ?", days="Хайх хоногийн тоо (1-180)")
+@bot.tree.command(name="restore_scores", description="Оноо/түйрийг сэргээх (embed+content, олон суваг дэмжинэ)")
+@app_commands.describe(
+    channel="Ямар channel-оос сэргээх вэ? (хоосон бол бүх text channel)",
+    days="Хайх хоног (1–180)",
+    replace="DB-г бүрэн цэвэрлээд шинээр бичих үү?",
+    all_channels="Бүх текст channel-уудыг уух уу? (channel-ыг үл тооно)"
+)
 @app_commands.checks.has_permissions(administrator=True)
 async def restore_scores(
     interaction: discord.Interaction,
-    channel: discord.TextChannel,
-    days: app_commands.Range[int, 1, 180] = 120
+    channel: Optional[discord.TextChannel] = None,
+    days: app_commands.Range[int, 1, 180] = 120,
+    replace: bool = False,
+    all_channels: bool = False
 ):
     await interaction.response.defer(thinking=True)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-    pairs = await _scan_channel(channel, cutoff)
-    # uid бүрийн хамгийн сүүлчийн state
-    latest: dict[int, dict] = {}  # {uid: {"score": int, "tier": str, "ts": datetime}}
+    latest: dict[int, dict] = {}  # uid -> {score, tier, ts}
 
-    for m, info in pairs:
-        cmd = info["cmd"]
-        if cmd not in ("add_score", "set_match_result", "set_match_result_fountain", "set_tier"):
-            continue
-
-        text = _full_text(m)
-        block = _parse_scores_block(text, default_tier="4-1")
-        if not block:
-            # add_score / set_tier хариу нь ганц мөрөөр ирдэг тохиолдолд content-оос дахин оролдоно
-            block = _parse_scores_block(m.content or "", default_tier="4-1")
-
-        if not block:
-            continue
-
-        for uid, st in block.items():
-            prev = latest.get(uid)
+    for ch in _target_channels(interaction.guild, channel, all_channels):
+        # Онооны хувьд interaction-тэй reply-үүдийг л авч шуугиан багасгана
+        pairs = await _scan_channel(ch, cutoff, require_interaction=True)
+        for m, info in pairs:
+            cmd = (info["cmd"] or "")
+            if cmd not in ("add_score", "set_match_result", "set_match_result_fountain", "set_tier"):
+                continue
+            block = _parse_scores_block(_full_text(m), default_tier="4-1") or \
+                    _parse_scores_block(m.content or "", default_tier="4-1")
+            if not block:
+                continue
             ts = m.created_at or datetime.now(timezone.utc)
-            if (prev is None) or (ts > prev["ts"]):
-                latest[uid] = {
-                    "score": st.get("score"),
-                    "tier":  st.get("tier") or (prev.get("tier") if prev else "4-1"),
-                    "ts": ts
-                }
+            for uid, st in block.items():
+                prev = latest.get(uid)
+                if (prev is None) or (ts > prev["ts"]):
+                    latest[uid] = {"score": st.get("score"),
+                                   "tier":  st.get("tier") or (prev.get("tier") if prev else "4-1"),
+                                   "ts": ts}
+        await asyncio.sleep(0.3)
 
-    # DB-руу upsert хийх
-    restored = 0
+    # Username-уудыг урьдчилж татаж, DB-руу бичих багц
+    rows = []
     for uid, st in latest.items():
+        username = await _username_for(interaction.guild, int(uid))
         score = int(st["score"]) if st.get("score") is not None else 0
         tier  = st.get("tier") or "4-1"
-        try:
-            username = await _username_for(channel.guild, uid)
-            await upsert_score(uid, score, tier, username)
-            restored += 1
-        except Exception as e:
-            print(f"❌ upsert_score uid={uid} алдаа: {e}")
+        rows.append((int(uid), score, tier, username))
 
+    restored = 0
+    if replace:
+        conn = await db()
+        try:
+            async with conn.transaction():
+                await conn.execute("TRUNCATE public.scores")
+                if rows:
+                    await conn.executemany("""
+                        INSERT INTO public.scores (uid, score, tier, username, updated_at)
+                        VALUES ($1, $2, $3, $4, now())
+                        ON CONFLICT (uid) DO UPDATE
+                          SET score=EXCLUDED.score, tier=EXCLUDED.tier, username=EXCLUDED.username, updated_at=now()
+                    """, rows)
+                    restored = len(rows)
+        finally:
+            await conn.close()
+    else:
+        for uid, score, tier, username in rows:
+            try:
+                await upsert_score(uid, score, tier, username)
+                restored += 1
+            except Exception as e:
+                print(f"❌ upsert_score uid={uid} алдаа: {e}")
+
+    scope = "бүх сувгаас" if (all_channels or channel is None) else channel.mention
     await interaction.followup.send(
-        f"✅ {channel.mention} дотор **{restored} тоглогчийн** оноо/түйрийг сэргээв. (сүүлийн {days} өдөр)\n"
-        f"ℹ️ Embed болон текстийн мөр бүрээс <@uid> гарж ирсэн **шугамын шинэ оноо/түйр**-ийг авч хамгийн сүүлийн төлөвт дөхүүлсэн."
+        f"✅ {scope} **{restored} тоглогчийн** оноо/түйрийг сэргээв. (сүүлийн {days} өдөр)"
+        + (" **[FULL REPLACE]**" if replace else "")
     )
 
 
