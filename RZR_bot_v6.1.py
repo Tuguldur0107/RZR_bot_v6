@@ -7,6 +7,8 @@ from datetime import datetime, timezone, timedelta
 import unicodedata
 import re
 
+from typing import Tuple
+
 # 🌿 Third-party modules
 import discord
 from discord import app_commands, Embed
