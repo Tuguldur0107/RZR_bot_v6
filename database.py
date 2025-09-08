@@ -417,3 +417,27 @@ def get_current_teams(session_id: int):
         )
         rows = cur.fetchall()
         return [{"team_no": r[0], "members": list(r[1] or [])} for r in rows]
+
+
+# ===== Absolute restore helper (truncate + bulk insert) =====
+async def replace_donators(items: list[tuple[int, int, datetime]]) -> int:
+    """
+    items: [(uid, total_mnt, last_ts), ...]
+    Бүх donators хүснэгтийг *нэг мөсөн* сольж тавина (single-run restore).
+    """
+    conn = await connect()
+    try:
+        async with conn.transaction():
+            await conn.execute("TRUNCATE TABLE donators")
+            inserted = 0
+            for uid, total, last_ts in items:
+                await conn.execute("""
+                    INSERT INTO donators (uid, total_mnt, last_donated)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (uid) DO UPDATE
+                    SET total_mnt = EXCLUDED.total_mnt, last_donated = EXCLUDED.last_donated
+                """, int(uid), int(total), last_ts or datetime.now(timezone.utc))
+                inserted += 1
+            return inserted
+    finally:
+        await conn.close()

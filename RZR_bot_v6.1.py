@@ -7,7 +7,6 @@ from datetime import datetime, timezone, timedelta
 import unicodedata
 import re
 
-from typing import Tuple
 
 # 🌿 Third-party modules
 import discord
@@ -1192,119 +1191,55 @@ def _shorten(text: str | None, limit: int) -> str:
 
 
 
+# /add_donator хариуны формат:
+#  - Embed.title: "🎉 Donator Added"
+#  - Embed.description эсвэл текст: "<@123456> хандив өглөө! (+10,000₮)"
+#  - Файл хавсаргасан байж болно (donator.png)
+_DON_EMB_TITLE = re.compile(r"donator added", re.IGNORECASE)
+_MENTION_UID   = re.compile(r"<@(\d+)>")
+_AMOUNT        = re.compile(r"\(\s*\+?\s*([0-9][0-9,._ ]*)\s*(?:₮|MNT)?\s*\)")
 
-
-
-
-
-
-INT32_MIN, INT32_MAX = -2147483648, 2147483647
-
-def _clamp_i32(v: int | None) -> int:
-    if v is None:
-        return 0
-    try:
-        v = int(v)
-    except Exception:
-        v = 0
-    return max(INT32_MIN, min(INT32_MAX, v))
-
-# 👉 Танай tier шалгах функц байгаа бол шууд ашиглана; байхгүй бол хамгийн энгийн хувилбар:
-_TIER_RE = re.compile(r"^(legend(?:\s*\d+)?)|(\d-\d)$", re.IGNORECASE)
-def is_valid_tier(t: str | None) -> bool:
-    if not t:
-        return False
-    return bool(_TIER_RE.match(t.strip()))
-
-def _pick_last(state: dict[int, dict], uid: int, ts: datetime,
-               score: int | None, tier: str | None, username: str | None):
+def _parse_donate_from_message(msg) -> list[tuple[int, int]]:
     """
-    UID бүрийн хамгийн сүүлийн (том timestamp) state-ийг хадгална.
+    Ботын нэг хариунаас [(uid, amount_mnt), ...] жагсаалт гаргаж авна.
+    Одоогоор нэг UID нэг дүнтэй байдаг ч хамгаалалттай байя.
     """
-    cur = state.get(uid)
-    if (cur is None) or (ts > cur["ts"]):
-        d = cur["data"] if cur else {}
-        new_score = _clamp_i32(score if score is not None else d.get("score"))
-        new_tier  = (tier or d.get("tier") or "4-1").strip()
-        if not is_valid_tier(new_tier):
-            new_tier = "4-1"
-        state[uid] = {
-            "ts": ts,
-            "data": {
-                "uid": uid,
-                "username": (username or d.get("username") or "Unknown"),
-                "score": new_score,
-                "tier": new_tier
-            }
-        }
+    pairs = []
 
-# -------------------------- Parsers & Regex --------------------------
+    # 1) Embeds
+    for emb in (msg.embeds or []):
+        ed = emb.to_dict()
+        title = (ed.get("title") or "")
+        desc  = (ed.get("description") or "")  # "… хандив өглөө! (+10,000₮)"
+        if not _DON_EMB_TITLE.search(title):
+            continue
 
-# /add_score plain text line жишээ:
-# "<@123>: +2 | Score 3→5 | Tier: 4-1→4-1 (…)"  эсвэл  "Tier: 4-1"
-_ADD_SCORE_LINE = re.compile(
-    r"<@(?P<uid>\d+)>\s*:\s*[+\-]?\d+.*?Score\s+[-]?\d+\s*→\s*(?P<score>[-]?\d+).*?"
-    r"(?:Tier[: ]\s*(?:(?:[^→\n]+)→)?\s*(?P<tier>[^\s|)]+))?",
-    re.IGNORECASE
-)
+        # UID
+        uids = set(int(m.group(1)) for m in _MENTION_UID.finditer(desc))
+        if not uids and msg.mentions:
+            uids = {m.id for m in msg.mentions}
 
-# set_match_result(_fountain) embed доторх мөр жишээ:
-# "- <@123> — `3 → 4` · `[4-1 → 4-1]`"
-_SET_MATCH_LINE = re.compile(
-    r"<@(?P<uid>\d+)>\D+`[^`]*→\s*(?P<score>[-]?\d+)`\D+\[\s*(?:[^\]\s]+)\s*→\s*(?P<tier>[^\]\s]+)\s*\]",
-    re.IGNORECASE
-)
+        # Amount
+        m = _AMOUNT.search(desc)
+        if not m:
+            continue
+        amt = int(re.sub(r"[^\d-]", "", m.group(1)) or "0")
 
-# my_score / user_score embed-ийн талбаруудаас score/tier авах
-def _parse_score_embed_fields(emb_dict: dict) -> Tuple[int | None, str | None]:
-    s, t = None, None
-    for f in emb_dict.get("fields", []) or []:
-        name = (f.get("name") or "").strip().lower()
-        val  = (f.get("value") or "").strip()
-        if name == "score":
-            m = re.search(r"[-+]?\d+", val)
-            if m:
-                s = int(m.group(0))
-        elif name == "tier":
-            m = re.search(r"(legend(?:\s+\d+)?)|(\d-\d)", val, re.IGNORECASE)
-            if m:
-                t = m.group(0)
-    return s, t
+        for uid in uids:
+            pairs.append((int(uid), int(amt)))
 
-# my_score embed дээрх "User ID: 123456789"-ийг барих
-_USERID_RE = re.compile(r"User\s*ID\s*:\s*(\d{5,})", re.IGNORECASE)
-def _extract_uid_from_embed(emb_d: dict) -> int | None:
-    parts: list[str] = []
-    if emb_d.get("footer"): parts.append(emb_d["footer"].get("text") or "")
-    if emb_d.get("description"): parts.append(emb_d["description"] or "")
-    for f in emb_d.get("fields") or []:
-        parts.append(f.get("name") or "")
-        parts.append(f.get("value") or "")
-    m = _USERID_RE.search("\n".join(parts))
-    return int(m.group(1)) if m else None
+    # 2) Fallback — зөвхөн текст илгээсэн тохиолдол
+    if not pairs:
+        text = msg.content or ""
+        if text:
+            uids = set(int(m.group(1)) for m in _MENTION_UID.finditer(text))
+            m = _AMOUNT.search(text)
+            if uids and m:
+                amt = int(re.sub(r"[^\d-]", "", m.group(1)) or "0")
+                for uid in uids:
+                    pairs.append((int(uid), int(amt)))
 
-def _try_parse_add_score_text(text: str):
-    out = []
-    for line in (text or "").splitlines():
-        m = _ADD_SCORE_LINE.search(line)
-        if m:
-            uid   = int(m.group("uid"))
-            score = int(m.group("score"))
-            tier  = m.group("tier").strip() if m.group("tier") else None
-            out.append((uid, score, tier))
-    return out
-
-def _try_parse_set_match_lines(field_value: str):
-    out = []
-    for line in (field_value or "").splitlines():
-        m = _SET_MATCH_LINE.search(line)
-        if m:
-            uid   = int(m.group("uid"))
-            score = int(m.group("score"))
-            tier  = m.group("tier").strip()
-            out.append((uid, score, tier))
-    return out
-
+    return pairs
 
 
 
@@ -3542,210 +3477,66 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
 
 
-
-
-
-# channel_id autocomplete: бүх текст сувгийг нэрээр хайж 25 хүртэл харуулна
-@app_commands.autocomplete(name="channel_id")
-async def _ac_channel_id(interaction: discord.Interaction, current: str):
-    try:
-        chans = [
-            app_commands.Choice(name=f"#{c.name}", value=str(c.id))
-            for c in interaction.guild.text_channels
-            if (not current) or (current.lower() in c.name.lower())
-        ]
-        return chans[:25]
-    except Exception:
-        return []
-
-@bot.tree.command(name="restore_scores", description="Сувгийн түүхээс хамгийн сүүлийн score/tier-ийг сэргээнэ (админ)")
-@app_commands.describe(
-    channel="Хайх текст суваг (picker)",
-    channel_id="Эсвэл сувгийн ID / нэрээрээ хайх (autocomplete)",
-    days="Сүүлийн хэдэн өдөрөөс хайх (default: 30, max: 180)"
-)
+@bot.tree.command(name="restore_donators_all", description="Бүх text channel-уудаас Donator бүртгэлийг сэргээнэ (админ)")
+@app_commands.describe(days="Сүүлийн хэдэн өдөрөөс хайх (default: 120, max: 365)")
 @app_commands.default_permissions(administrator=True)
-async def restore_scores(
-    interaction: discord.Interaction,
-    channel: discord.TextChannel | None = None,
-    channel_id: str | None = None,
-    days: int = 30
-):
-    # Defer
+async def restore_donators_all(interaction: discord.Interaction, days: int = 120):
     try:
         await interaction.response.defer(thinking=True)
     except discord.errors.InteractionResponded:
         return
 
-    # Resolve channel (picker эсвэл autocomplete аль нэгийг заавал)
-    if not channel and channel_id:
-        try:
-            channel = interaction.guild.get_channel(int(channel_id))  # may return None
-        except Exception:
-            channel = None
-
-    if not channel:
-        await interaction.followup.send("⚠️ Сувгаа `channel` эсвэл `channel_id`-аар заана уу.")
-        return
-
-    # Clamp days
-    days = max(1, min(days, 180))
+    days = max(1, min(days, 365))
     after_dt = datetime.now(timezone.utc) - timedelta(days=days)
 
-    # Парслагдсан хамгийн сүүлийн state
-    state: dict[int, dict] = {}
+    # Нэгтгэл: uid -> {"total": сум, "last": хамгийн сүүлийн ts}
+    agg: dict[int, dict] = {}
+    checked_chans = 0
+    scanned_msgs  = 0
 
-    # Түүхийг унших – зөвхөн манай ботын (author == bot.user) хариунууд
-    async for msg in channel.history(limit=None, after=after_dt, oldest_first=False):
-        try:
-            if msg.author.id != bot.user.id:
-                continue
-
-            ts = msg.created_at
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-
-            # 1) /add_score – plain text lines
-            for uid, sc, tr in _try_parse_add_score_text(msg.content or ""):
-                member = interaction.guild.get_member(uid)
-                _pick_last(state, uid, ts, sc, tr, member.display_name if member else None)
-
-            # 2) Embeds
-            for emb in msg.embeds or []:
-                emb_d = emb.to_dict()
-                title = (emb_d.get("title") or "").lower()
-                desc  = (emb_d.get("description") or "")
-
-                # set_match_result(_fountain): winners/losers талбаруудаас мөр бүрийг уншина
-                if "match result" in title:
-                    for fld in emb_d.get("fields", []) or []:
-                        for uid, sc, tr in _try_parse_set_match_lines(fld.get("value") or ""):
-                            member = interaction.guild.get_member(uid)
-                            _pick_last(state, uid, ts, sc, tr, member.display_name if member else None)
-                    continue
-
-                # my_score / user_score: score, tier талбар + embed доторх User ID
-                lower_all = f"{title}\n{desc}".lower()
-                if ("tier • score • weight" in lower_all) or ("таны tier • score • weight" in lower_all):
-                    sc, tr = _parse_score_embed_fields(emb_d)
-                    uid = _extract_uid_from_embed(emb_d)
-
-                    # Хэрэв embed дотроос UID олдохгүй бол мессежийн mention-оос fallback
-                    uids = [uid] if uid else [m.id for m in (msg.mentions or [])]
-                    for one in uids:
-                        member = interaction.guild.get_member(one)
-                        _pick_last(state, one, ts, sc, tr, member.display_name if member else None)
-
-        except Exception:
-            # ямар нэг форматын зөрүү гарвал тухайн мессежийг алгасна
-            continue
-
-    if not state:
-        await interaction.followup.send(f"📭 `#{channel.name}` дотор тохирох мессеж олдсонгүй. (сүүлийн {days} өдөр)")
-        return
-
-    # DB-д бичих
-    from database import upsert_score  # танай database.py доторх upsert
-    ok, fail = 0, 0
-    for uid, item in state.items():
-        data = item["data"]
-        try:
-            await upsert_score(
-                data["uid"],
-                _clamp_i32(data["score"]),
-                data["tier"],
-                data.get("username") or "Unknown",
-            )
-            ok += 1
-        except Exception:
-            fail += 1
-            continue
-
-    await interaction.followup.send(
-        f"✅ `#{channel.name}` дотор **{ok}** тоглогчийн оноо/түйрийг сэргээв. "
-        f"(сүүлийн {days} өдөр){' • ⚠️ алдаа: '+str(fail) if fail else ''}"
-    )
-
-
-@bot.tree.command(name="restore_scores_all", description="Бүх text channel-уудаас оноо/tier сэргээнэ (админ)")
-@app_commands.describe(
-    days="Сүүлийн хэдэн өдөрөөс хайх (default: 30, max: 180)"
-)
-@app_commands.default_permissions(administrator=True)
-async def restore_scores_all(interaction: discord.Interaction, days: int = 30):
-    try:
-        await interaction.response.defer(thinking=True)
-    except discord.errors.InteractionResponded:
-        return
-
-    days = max(1, min(days, 180))
-    after_dt = datetime.now(timezone.utc) - timedelta(days=days)
-
-    state: dict[int, dict] = {}
-    checked_channels, total_msgs = 0, 0
-
-    for channel in interaction.guild.text_channels:
-        # Ботод зөвшөөрөл байгаа эсэхийг шалгана
-        perms = channel.permissions_for(interaction.guild.me)
+    for ch in interaction.guild.text_channels:
+        perms = ch.permissions_for(interaction.guild.me)
         if not (perms.view_channel and perms.read_message_history):
             continue
+        checked_chans += 1
 
-        checked_channels += 1
-        async for msg in channel.history(limit=None, after=after_dt, oldest_first=False):
-            total_msgs += 1
+        async for msg in ch.history(limit=None, after=after_dt, oldest_first=False):
+            scanned_msgs += 1
             if msg.author.id != bot.user.id:
                 continue
+
             ts = msg.created_at
-            if ts.tzinfo is None:
+            if ts and ts.tzinfo is None:
                 ts = ts.replace(tzinfo=timezone.utc)
 
-            # add_score plain text
-            for uid, sc, tr in _try_parse_add_score_text(msg.content or ""):
-                member = interaction.guild.get_member(uid)
-                _pick_last(state, uid, ts, sc, tr, member.display_name if member else None)
+            for uid, amt in _parse_donate_from_message(msg):
+                cur = agg.get(uid) or {"total": 0, "last": datetime(1970,1,1, tzinfo=timezone.utc)}
+                cur["total"] += max(0, int(amt))
+                if ts and ts > cur["last"]:
+                    cur["last"] = ts
+                agg[uid] = cur
 
-            # embeds
-            for emb in msg.embeds or []:
-                emb_d = emb.to_dict()
-                title = (emb_d.get("title") or "").lower()
-                desc  = (emb_d.get("description") or "")
+    if not agg:
+        return await interaction.followup.send(
+            f"📭 Donator лог олдсонгүй. (сүүлийн {days} өдөр, {checked_chans} суваг шалгав)"
+        )
 
-                if "match result" in title:
-                    for fld in emb_d.get("fields", []) or []:
-                        for uid, sc, tr in _try_parse_set_match_lines(fld.get("value") or ""):
-                            member = interaction.guild.get_member(uid)
-                            _pick_last(state, uid, ts, sc, tr, member.display_name if member else None)
-                    continue
-
-                if "tier • score • weight" in desc.lower() or "таны tier • score • weight" in desc.lower():
-                    sc, tr = _parse_score_embed_fields(emb_d)
-                    uid = _extract_uid_from_embed(emb_d)
-                    uids = [uid] if uid else [m.id for m in (msg.mentions or [])]
-                    for one in uids:
-                        member = interaction.guild.get_member(one)
-                        _pick_last(state, one, ts, sc, tr, member.display_name if member else None)
-
-    if not state:
-        await interaction.followup.send(f"📭 Оноо сэргээх лог олдсонгүй. (сүүлийн {days} өдөр, {checked_channels} суваг шалгав)")
-        return
-
-    from database import upsert_score
-    ok, fail = 0, 0
-    for uid, item in state.items():
-        data = item["data"]
-        ts   = item["ts"]
-        try:
-            await upsert_score(data["uid"], _clamp_i32(data["score"]), data["tier"], data.get("username") or "Unknown")
-            ok += 1
-        except Exception:
-            fail += 1
-            continue
+    # DB-д абсолют утгаар суулгах (TRUNCATE+INSERT)
+    from database import replace_donators  # доорх 2-р хэсэгт нэмнэ
+    rows = [(uid, data["total"], data["last"]) for uid, data in agg.items() if data["total"] > 0]
+    ok = 0
+    try:
+        ok = await replace_donators(rows)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return await interaction.followup.send(f"❌ DB-д бичих үед алдаа гарлаа: {e}")
 
     await interaction.followup.send(
-        f"✅ **{checked_channels}** сувгаас {total_msgs} мессеж шалгаад, "
-        f"**{ok}** тоглогчийн оноо/tier сэргээв. (сүүлийн {days} өдөр)"
-        + (f" • ⚠️ алдаа: {fail}" if fail else "")
+        f"✅ **{checked_chans}** сувгаас {scanned_msgs} мессеж шалгаад, "
+        f"**{ok}** donator-ыг сэргээж бичлээ. (сүүлийн {days} өдөр)"
     )
+# ===================== END RESTORE DONATORS =====================
+
 
 
 
