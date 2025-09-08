@@ -1182,6 +1182,45 @@ def _shorten(text: str | None, limit: int) -> str:
     return (s[:max(0, limit - 1)] + "…") if len(s) > limit else s
 
 
+
+
+
+
+
+
+# 🛠 Utility: Guild-ийн бүх текст channel-уудаас мессеж fetch хийдэг
+async def _fetch_all_messages(guild, cutoff: datetime):
+    msgs = []
+    for ch in guild.text_channels:
+        try:
+            async for m in ch.history(limit=None, after=cutoff):
+                if m.author.bot and m.interaction:  # зөвхөн ботын хариу + командтай
+                    msgs.append(m)
+        except Exception as e:
+            print(f"⚠️ Channel ухахад алдаа #{ch.name}: {e}")
+    return msgs
+
+# 🛠 Utility: channel доторхи мессежүүдийг ухаж авна
+async def _fetch_channel_messages(ch, cutoff: datetime):
+    msgs = []
+    try:
+        async for m in ch.history(limit=None, after=cutoff, oldest_first=True):
+            if m.author.bot and m.interaction:  # зөвхөн ботын хариу + slash command
+                msgs.append(m)
+    except Exception as e:
+        print(f"⚠️ Channel ухахад алдаа #{ch.name}: {e}")
+    return msgs
+
+
+
+
+
+
+
+
+
+
+
 # 🧬 Start
 @bot.event
 async def on_ready():
@@ -3394,6 +3433,94 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
     emb.set_footer(text=("Seed: {}".format(seed) if seed is not None else "Random every time"))
     await interaction.followup.send(embed=emb)
+
+
+
+
+
+
+
+
+
+
+
+
+# 🛠 Score сэргээх
+@bot.tree.command(name="restore_scores", description="Сонгосон channel-оос онооны өгөгдлийг сэргээнэ")
+@app_commands.describe(channel="Ямар channel-оос сэргээх вэ?")
+@app_commands.checks.has_permissions(administrator=True)
+async def restore_scores(interaction: discord.Interaction, channel: discord.TextChannel):
+    await interaction.response.defer(thinking=True)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+
+    msgs = await _fetch_channel_messages(channel, cutoff)
+    restored = 0
+
+    for m in msgs:
+        cmd = m.interaction.name
+        if cmd not in ["add_score", "set_match_result", "set_match_result_fountain", "set_tier"]:
+            continue
+
+        uid = m.interaction.user.id
+        username = m.interaction.user.display_name
+
+        # Танай ботын хариу текстэнд тааруулж regex-ээ энд өөрчилнө
+        score_match = re.search(r"New score[: ]+(\d+)", m.content)
+        tier_match = re.search(r"Tier[: ]+([A-Za-z0-9\- ]+)", m.content)
+
+        score = int(score_match.group(1)) if score_match else 0
+        tier = tier_match.group(1) if tier_match else "4-1"
+
+        try:
+            await upsert_score(uid, score, tier, username)
+            restored += 1
+        except Exception as e:
+            print(f"❌ upsert_score алдаа uid={uid}: {e}")
+
+    await interaction.followup.send(f"✅ {channel.mention} дотор {restored} тоглогчийн оноо сэргээгдлээ.")
+
+# 🛠 Donator сэргээх
+@bot.tree.command(name="restore_donators", description="Сонгосон channel-оос донаторын өгөгдлийг сэргээнэ")
+@app_commands.describe(channel="Ямар channel-оос сэргээх вэ?")
+@app_commands.checks.has_permissions(administrator=True)
+async def restore_donators(interaction: discord.Interaction, channel: discord.TextChannel):
+    await interaction.response.defer(thinking=True)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=10)
+
+    msgs = await _fetch_channel_messages(channel, cutoff)
+    restored = 0
+
+    for m in msgs:
+        if m.interaction.name != "add_donator":
+            continue
+
+        uid = m.interaction.user.id
+        username = m.interaction.user.display_name
+
+        # Жишээ: "🎖️ Donator: <@123456> — 20000₮"
+        amount_match = re.search(r"(\d[\d,\.]*)", m.content)
+        amount = int(amount_match.group(1).replace(",", "")) if amount_match else 0
+
+        try:
+            await upsert_donator(uid, amount)
+            restored += 1
+        except Exception as e:
+            print(f"❌ upsert_donator алдаа uid={uid}: {e}")
+
+    await interaction.followup.send(f"💖 {channel.mention} дотор {restored} донатор сэргээгдлээ.")
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # 🎯 Run
