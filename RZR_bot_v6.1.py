@@ -3517,7 +3517,7 @@ async def restore_scores(interaction: discord.Interaction, channel: str):
     if not ch:
         return await interaction.followup.send("⚠️ Channel олдсонгүй.")
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=120)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
     pairs = await _fetch_channel_messages(ch, cutoff)  # [(message, info), ...]
 
     restored = 0
@@ -3555,7 +3555,7 @@ async def restore_donators(interaction: discord.Interaction, channel: str):
     if not ch:
         return await interaction.followup.send("⚠️ Channel олдсонгүй.")
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=120)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
     pairs = await _fetch_channel_messages(ch, cutoff)
 
     restored = 0
@@ -3576,7 +3576,7 @@ async def restore_donators(interaction: discord.Interaction, channel: str):
             print(f"❌ upsert_dонатор алдаа uid={uid}: {e}")
 
     await interaction.followup.send(f"💖 {ch.mention} дотор {restored} донатор сэргээгдлээ.")
-    
+
 @restore_donators.autocomplete('channel')
 async def restore_donators_channel_ac(interaction: discord.Interaction, current: str):
     return await _channel_choices(interaction.guild, current)
