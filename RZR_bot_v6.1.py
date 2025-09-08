@@ -3667,6 +3667,85 @@ async def restore_scores(
     )
 
 
+@bot.tree.command(name="restore_scores_all", description="Бүх text channel-уудаас оноо/tier сэргээнэ (админ)")
+@app_commands.describe(
+    days="Сүүлийн хэдэн өдөрөөс хайх (default: 30, max: 180)"
+)
+@app_commands.default_permissions(administrator=True)
+async def restore_scores_all(interaction: discord.Interaction, days: int = 30):
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.errors.InteractionResponded:
+        return
+
+    days = max(1, min(days, 180))
+    after_dt = datetime.now(timezone.utc) - timedelta(days=days)
+
+    state: dict[int, dict] = {}
+    checked_channels, total_msgs = 0, 0
+
+    for channel in interaction.guild.text_channels:
+        # Ботод зөвшөөрөл байгаа эсэхийг шалгана
+        perms = channel.permissions_for(interaction.guild.me)
+        if not (perms.view_channel and perms.read_message_history):
+            continue
+
+        checked_channels += 1
+        async for msg in channel.history(limit=None, after=after_dt, oldest_first=False):
+            total_msgs += 1
+            if msg.author.id != bot.user.id:
+                continue
+            ts = msg.created_at
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+
+            # add_score plain text
+            for uid, sc, tr in _try_parse_add_score_text(msg.content or ""):
+                member = interaction.guild.get_member(uid)
+                _pick_last(state, uid, ts, sc, tr, member.display_name if member else None)
+
+            # embeds
+            for emb in msg.embeds or []:
+                emb_d = emb.to_dict()
+                title = (emb_d.get("title") or "").lower()
+                desc  = (emb_d.get("description") or "")
+
+                if "match result" in title:
+                    for fld in emb_d.get("fields", []) or []:
+                        for uid, sc, tr in _try_parse_set_match_lines(fld.get("value") or ""):
+                            member = interaction.guild.get_member(uid)
+                            _pick_last(state, uid, ts, sc, tr, member.display_name if member else None)
+                    continue
+
+                if "tier • score • weight" in desc.lower() or "таны tier • score • weight" in desc.lower():
+                    sc, tr = _parse_score_embed_fields(emb_d)
+                    uid = _extract_uid_from_embed(emb_d)
+                    uids = [uid] if uid else [m.id for m in (msg.mentions or [])]
+                    for one in uids:
+                        member = interaction.guild.get_member(one)
+                        _pick_last(state, one, ts, sc, tr, member.display_name if member else None)
+
+    if not state:
+        await interaction.followup.send(f"📭 Оноо сэргээх лог олдсонгүй. (сүүлийн {days} өдөр, {checked_channels} суваг шалгав)")
+        return
+
+    from database import upsert_score
+    ok, fail = 0, 0
+    for uid, item in state.items():
+        data = item["data"]
+        ts   = item["ts"]
+        try:
+            await upsert_score(data["uid"], _clamp_i32(data["score"]), data["tier"], data.get("username") or "Unknown")
+            ok += 1
+        except Exception:
+            fail += 1
+            continue
+
+    await interaction.followup.send(
+        f"✅ **{checked_channels}** сувгаас {total_msgs} мессеж шалгаад, "
+        f"**{ok}** тоглогчийн оноо/tier сэргээв. (сүүлийн {days} өдөр)"
+        + (f" • ⚠️ алдаа: {fail}" if fail else "")
+    )
 
 
 
