@@ -1187,6 +1187,21 @@ def _shorten(text: str | None, limit: int) -> str:
 
 
 
+# ---------- Autocomplete (25 хүртэл channel) ----------
+async def _channel_choices(guild, current: str):
+    # нэрээр нь шүүж, 25 хүргээд буцаана
+    cur = (current or "").lower()
+    chans = []
+    for ch in guild.text_channels:
+        if not cur or cur in ch.name.lower():
+            chans.append(ch)
+        if len(chans) >= 25:
+            break
+    # нэр + id-г харуулж, value-д id-г өгнө
+    return [
+        app_commands.Choice(name=f"#{ch.name}", value=str(ch.id))
+        for ch in chans
+    ]
 
 # 🛠 Utility: Guild-ийн бүх текст channel-уудаас мессеж fetch хийдэг
 async def _fetch_all_messages(guild, cutoff: datetime):
@@ -1200,16 +1215,17 @@ async def _fetch_all_messages(guild, cutoff: datetime):
             print(f"⚠️ Channel ухахад алдаа #{ch.name}: {e}")
     return msgs
 
-# 🛠 Utility: channel доторхи мессежүүдийг ухаж авна
-async def _fetch_channel_messages(ch, cutoff: datetime):
+# ---------- Туслах: channel доторхи мессежийг ухах ----------
+async def _fetch_channel_messages(ch, cutoff):
     msgs = []
     try:
         async for m in ch.history(limit=None, after=cutoff, oldest_first=True):
-            if m.author.bot and m.interaction:  # зөвхөн ботын хариу + slash command
+            if m.author.bot and m.interaction:
                 msgs.append(m)
     except Exception as e:
         print(f"⚠️ Channel ухахад алдаа #{ch.name}: {e}")
     return msgs
+
 
 
 
@@ -2283,67 +2299,67 @@ async def undo_last_match(interaction: discord.Interaction):
         print("❌ Match буцаах үед алдаа гарлаа:", e)
         await interaction.followup.send("❌ Match буцаах үед алдаа гарлаа.")
 
-# @bot.tree.command(name="my_score", description="Таны tier, score, weight-ийг харуулна")
-# async def my_score(interaction: discord.Interaction):
-#     try:
-#         await interaction.response.defer(thinking=True)  # public
-#     except discord.errors.InteractionResponded:
-#         return
+@bot.tree.command(name="my_score", description="Таны tier, score, weight-ийг харуулна")
+async def my_score(interaction: discord.Interaction):
+    try:
+        await interaction.response.defer(thinking=True)  # public
+    except discord.errors.InteractionResponded:
+        return
 
-#     uid = interaction.user.id
-#     try:
-#         data = await asyncio.wait_for(get_score(uid), timeout=GET_SCORE_TIMEOUT)
-#     except asyncio.TimeoutError:
-#         return await interaction.followup.send("⏱️ Оноог авахад удааширлаа. Дахин оролдоно уу.")
-#     except Exception as e:
-#         return await interaction.followup.send(f"⚠️ Оноог уншихад алдаа: {e}")
+    uid = interaction.user.id
+    try:
+        data = await asyncio.wait_for(get_score(uid), timeout=GET_SCORE_TIMEOUT)
+    except asyncio.TimeoutError:
+        return await interaction.followup.send("⏱️ Оноог авахад удааширлаа. Дахин оролдоно уу.")
+    except Exception as e:
+        return await interaction.followup.send(f"⚠️ Оноог уншихад алдаа: {e}")
 
-#     if not data:
-#         return await interaction.followup.send("⚠️ Таны оноо бүртгэлгүй байна.")
+    if not data:
+        return await interaction.followup.send("⚠️ Таны оноо бүртгэлгүй байна.")
 
-#     try:
-#         raw_tier = str(data.get("tier", "E")).strip()
-#         score = int(data.get("score", 0))
-#         username = data.get("username") or interaction.user.display_name
+    try:
+        raw_tier = str(data.get("tier", "E")).strip()
+        score = int(data.get("score", 0))
+        username = data.get("username") or interaction.user.display_name
 
-#         # weight (танай calculate_weight-ыг ашиглана)
-#         try:
-#             weight = int(calculate_weight(data))
-#         except Exception:
-#             base = int(TIER_WEIGHT.get(raw_tier, 0))
-#             weight = max(base + score, 0)
+        # weight (танай calculate_weight-ыг ашиглана)
+        try:
+            weight = int(calculate_weight(data))
+        except Exception:
+            base = int(TIER_WEIGHT.get(raw_tier, 0))
+            weight = max(base + score, 0)
 
-#         bar, pct, steps = _score_progress(score, width=18)
-#         colour, emoji = tier_style(raw_tier)
+        bar, pct, steps = _score_progress(score, width=18)
+        colour, emoji = tier_style(raw_tier)
 
-#         emb = discord.Embed(
-#             title=f"{emoji} {username}",
-#             description="**Таны Tier • Score • Weight**",
-#             colour=colour,
-#             timestamp=datetime.now(timezone.utc),
-#         )
-#         emb.set_thumbnail(url=interaction.user.display_avatar.url)
-#         emb.add_field(name="Tier",   value=f"**{raw_tier}**",    inline=True)
-#         emb.add_field(name="Score",  value=f"**{_num(score)}**", inline=True)
-#         emb.add_field(name="Weight", value=f"**{_num(weight)}**", inline=True)
+        emb = discord.Embed(
+            title=f"{emoji} {username}",
+            description="**Таны Tier • Score • Weight**",
+            colour=colour,
+            timestamp=datetime.now(timezone.utc),
+        )
+        emb.set_thumbnail(url=interaction.user.display_avatar.url)
+        emb.add_field(name="Tier",   value=f"**{raw_tier}**",    inline=True)
+        emb.add_field(name="Score",  value=f"**{_num(score)}**", inline=True)
+        emb.add_field(name="Weight", value=f"**{_num(weight)}**", inline=True)
 
-#         if "rank" in data:
-#             emb.add_field(name="Rank", value=f"#{_num(data['rank'])}", inline=True)
+        if "rank" in data:
+            emb.add_field(name="Rank", value=f"#{_num(data['rank'])}", inline=True)
 
-#         stats = []
-#         if "wins" in data:   stats.append(f"✅ Wins: **{_num(data['wins'])}**")
-#         if "losses" in data: stats.append(f"❌ Losses: **{_num(data['losses'])}**")
-#         if "games" in data:  stats.append(f"🎮 Games: **{_num(data['games'])}**")
-#         if stats:
-#             emb.add_field(name="Товч статистик", value="\n".join(stats), inline=False)
+        stats = []
+        if "wins" in data:   stats.append(f"✅ Wins: **{_num(data['wins'])}**")
+        if "losses" in data: stats.append(f"❌ Losses: **{_num(data['losses'])}**")
+        if "games" in data:  stats.append(f"🎮 Games: **{_num(data['games'])}**")
+        if stats:
+            emb.add_field(name="Товч статистик", value="\n".join(stats), inline=False)
 
-#         emb.add_field(name="Дараагийн шат хүртэл", value=f"`{bar}`  {pct}% • **{steps}/10**", inline=False)
-#         emb.set_footer(text=f"User ID: {uid}")
+        emb.add_field(name="Дараагийн шат хүртэл", value=f"`{bar}`  {pct}% • **{steps}/10**", inline=False)
+        emb.set_footer(text=f"User ID: {uid}")
 
-#         await interaction.followup.send(embed=emb)
-#     except Exception as e:
-#         # UI рендер үеийн ямар ч алдаа энд баригдаж мессэж бууна — "уншаад алга болох" асуудлыг хаана.
-#         await interaction.followup.send(f"⚠️ Дэлгэцэн дээр харуулахад алдаа: {type(e).__name__}: {e}")
+        await interaction.followup.send(embed=emb)
+    except Exception as e:
+        # UI рендер үеийн ямар ч алдаа энд баригдаж мессэж бууна — "уншаад алга болох" асуудлыг хаана.
+        await interaction.followup.send(f"⚠️ Дэлгэцэн дээр харуулахад алдаа: {type(e).__name__}: {e}")
 
 @bot.tree.command(name="user_score", description="Бусад тоглогчийн tier, score, weight-ийг харуулна")
 @app_commands.describe(user="Оноог нь харах discord хэрэглэгч")
@@ -3445,15 +3461,18 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
 
 
-# 🛠 Score сэргээх
+# ---------- SCORES ----------
 @bot.tree.command(name="restore_scores", description="Сонгосон channel-оос онооны өгөгдлийг сэргээнэ")
-@app_commands.describe(channel="Ямар channel-оос сэргээх вэ?")
+@app_commands.describe(channel="Ямар channel-оос сэргээх вэ? (autocomplete)")
 @app_commands.checks.has_permissions(administrator=True)
-async def restore_scores(interaction: discord.Interaction, channel: discord.TextChannel):
+async def restore_scores(interaction: discord.Interaction, channel: str):
     await interaction.response.defer(thinking=True)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=1)
+    ch = interaction.guild.get_channel(int(channel))
+    if not ch:
+        return await interaction.followup.send("⚠️ Channel олдсонгүй.")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=120)
 
-    msgs = await _fetch_channel_messages(channel, cutoff)
+    msgs = await _fetch_channel_messages(ch, cutoff)
     restored = 0
 
     for m in msgs:
@@ -3464,12 +3483,13 @@ async def restore_scores(interaction: discord.Interaction, channel: discord.Text
         uid = m.interaction.user.id
         username = m.interaction.user.display_name
 
-        # Танай ботын хариу текстэнд тааруулж regex-ээ энд өөрчилнө
-        score_match = re.search(r"New score[: ]+(\d+)", m.content)
-        tier_match = re.search(r"Tier[: ]+([A-Za-z0-9\- ]+)", m.content)
+        # ⚙️ Regex — score/tier-ийг олон хувилбараар барина
+        # Ж: "New score: 17", "Шинэ оноо: 17", "Оноо: 17"
+        score_match = re.search(r"(New score|Шинэ\s*оноо|Оноо)\s*[:：]\s*(\-?\d+)", m.content, re.I)
+        tier_match  = re.search(r"(Tier|Тир|Түвшин)\s*[:：]\s*([A-Za-z0-9\-]+)", m.content, re.I)
 
-        score = int(score_match.group(1)) if score_match else 0
-        tier = tier_match.group(1) if tier_match else "4-1"
+        score = int(score_match.group(2)) if score_match else 0
+        tier  = tier_match.group(2) if tier_match else "4-1"
 
         try:
             await upsert_score(uid, score, tier, username)
@@ -3477,17 +3497,24 @@ async def restore_scores(interaction: discord.Interaction, channel: discord.Text
         except Exception as e:
             print(f"❌ upsert_score алдаа uid={uid}: {e}")
 
-    await interaction.followup.send(f"✅ {channel.mention} дотор {restored} тоглогчийн оноо сэргээгдлээ.")
+    await interaction.followup.send(f"✅ {ch.mention} дотор {restored} тоглогчийн оноо сэргээгдлээ.")
 
-# 🛠 Donator сэргээх
+@restore_scores.autocomplete('channel')
+async def restore_scores_channel_ac(interaction: discord.Interaction, current: str):
+    return await _channel_choices(interaction.guild, current)
+
+# ---------- DONATORS ----------
 @bot.tree.command(name="restore_donators", description="Сонгосон channel-оос донаторын өгөгдлийг сэргээнэ")
-@app_commands.describe(channel="Ямар channel-оос сэргээх вэ?")
+@app_commands.describe(channel="Ямар channel-оос сэргээх вэ? (autocomplete)")
 @app_commands.checks.has_permissions(administrator=True)
-async def restore_donators(interaction: discord.Interaction, channel: discord.TextChannel):
+async def restore_donators(interaction: discord.Interaction, channel: str):
     await interaction.response.defer(thinking=True)
-    cutoff = datetime.now(timezone.utc) - timedelta(days=10)
+    ch = interaction.guild.get_channel(int(channel))
+    if not ch:
+        return await interaction.followup.send("⚠️ Channel олдсонгүй.")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=120)
 
-    msgs = await _fetch_channel_messages(channel, cutoff)
+    msgs = await _fetch_channel_messages(ch, cutoff)
     restored = 0
 
     for m in msgs:
@@ -3495,11 +3522,9 @@ async def restore_donators(interaction: discord.Interaction, channel: discord.Te
             continue
 
         uid = m.interaction.user.id
-        username = m.interaction.user.display_name
-
-        # Жишээ: "🎖️ Donator: <@123456> — 20000₮"
-        amount_match = re.search(r"(\d[\d,\.]*)", m.content)
-        amount = int(amount_match.group(1).replace(",", "")) if amount_match else 0
+        # Мөнгөн дүнг барина: "20,000", "20000₮", "20.000"
+        amt_match = re.search(r"(\d[\d,\.]*)", m.content)
+        amount = int(amt_match.group(1).replace(",", "").replace(".", "")) if amt_match else 0
 
         try:
             await upsert_donator(uid, amount)
@@ -3507,9 +3532,11 @@ async def restore_donators(interaction: discord.Interaction, channel: discord.Te
         except Exception as e:
             print(f"❌ upsert_donator алдаа uid={uid}: {e}")
 
-    await interaction.followup.send(f"💖 {channel.mention} дотор {restored} донатор сэргээгдлээ.")
+    await interaction.followup.send(f"💖 {ch.mention} дотор {restored} донатор сэргээгдлээ.")
 
-
+@restore_donators.autocomplete('channel')
+async def restore_donators_channel_ac(interaction: discord.Interaction, current: str):
+    return await _channel_choices(interaction.guild, current)
 
 
 
