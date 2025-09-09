@@ -1344,7 +1344,7 @@ async def show_added_players(interaction: discord.Interaction):
             data = all_scores.get(str(uid)) or get_default_tier()
             tier = data.get("tier", "4-1")
             score = int(data.get("score", 0))
-            weight = TIER_WEIGHT.get(tier, 0) + score
+            weight = calculate_weight(data)
             perf = await get_performance_emoji(uid)  # ✅/❌/⏸/➖
             return (uid, name, tier, score, weight, perf)
 
@@ -1685,7 +1685,7 @@ async def go_gpt(interaction: discord.Interaction, team_count: int, players_per_
     all_scores = []
     for uid in player_ids:
         data = await get_score(uid) or get_default_tier()
-        power = TIER_WEIGHT.get(data.get("tier", "4-1"), 0) + data.get("score", 0)
+        power = calculate_weight(data)
         all_scores.append({"id": uid, "power": power})
 
     sorted_players = sorted(all_scores, key=lambda x: x["power"], reverse=True)
