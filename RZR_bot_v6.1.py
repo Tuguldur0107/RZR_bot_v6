@@ -1182,7 +1182,6 @@ def _shorten(text: str | None, limit: int) -> str:
     s = (text or "-").strip().replace("\n", " ")
     return (s[:max(0, limit - 1)] + "…") if len(s) > limit else s
 
-
 # 🧬 Start
 @bot.event
 async def on_ready():
@@ -1226,7 +1225,6 @@ async def initialize_bot():
         print("📥 Session state амжилттай ачаалагдлаа.")
     except Exception as e:
         print("❌ Session ачаалах үед алдаа гарлаа:", e)
-
 
 # 🧩 Command: ping
 @bot.tree.command(name="ping", description="Bot-ийн latency-г шалгана")
@@ -3328,7 +3326,6 @@ async def kick_review_cmd(
     finally:
         await _db_release(con, from_pool)
 
-
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client) 
@@ -3392,9 +3389,6 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 
     emb.set_footer(text=("Seed: {}".format(seed) if seed is not None else "Random every time"))
     await interaction.followup.send(embed=emb)
-
-
-
 
 
 # 🎯 Run
