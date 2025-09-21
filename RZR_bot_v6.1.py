@@ -7,7 +7,6 @@ from datetime import datetime, timezone, timedelta
 import unicodedata
 import re
 
-
 # 🌿 Third-party modules
 import discord
 from discord import app_commands, Embed
@@ -23,6 +22,7 @@ from typing import Dict, List
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageFont, ImageChops, __file__ as PIL_FILE
 from io import BytesIO
+from io import StringIO
 
 # 🗄️ Local modules
 from database import (
@@ -2591,9 +2591,6 @@ class Donor(commands.Cog):
         if file:
             return await interaction.followup.send(text, file=file)
         return await interaction.followup.send(text)
-
-from io import StringIO
-import discord
 
 @bot.tree.command(name="donator_list", description="Donator хэрэглэгчдийн жагсаалт")
 async def donator_list(interaction: discord.Interaction):
