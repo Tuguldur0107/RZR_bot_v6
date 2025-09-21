@@ -6,17 +6,15 @@ from dotenv import load_dotenv
 import json
 
 
-DB_URL = os.getenv("DATABASE_URL")
-
-now = datetime.now(timezone.utc)
-
-async def connect():
-    return await asyncpg.connect(DB_URL)
-
 # database.py файлд дараах функцуудыг нэм:
 
 load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+now = datetime.now(timezone.utc)
+
+async def connect():
+    return await asyncpg.connect(DATABASE_URL)
 
 pool = None
 
