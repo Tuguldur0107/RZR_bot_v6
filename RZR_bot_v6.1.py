@@ -9,15 +9,14 @@ import re
 
 # 🌿 Third-party modules
 import discord
-from discord import app_commands, Embed
+from discord import app_commands, Embed 
 from discord.ext import commands
 from discord.app_commands import checks 
 from dotenv import load_dotenv
 import asyncpg
 import openai
-from asyncio import sleep
 from typing import List, Dict, Optional
-import math, ssl, random, os, PIL
+import math, ssl, random
 from typing import Dict, List
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageFont, ImageChops, __file__ as PIL_FILE
@@ -26,7 +25,7 @@ from io import StringIO
 
 # 🗄️ Local modules
 from database import (
-    connect, pool, init_pool, ensure_pool,
+    pool, init_pool, ensure_pool,
 
     # 🎯 Score & tier
     get_score, upsert_score, get_all_scores, get_default_tier,

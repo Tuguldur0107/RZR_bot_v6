@@ -6,6 +6,7 @@ import datetime as dt
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
+from database import init_pool
 
 # Tier → monthly fee map (₮)
 TIERS = {1: 0, 2: 10000, 3: 15000, 4: 20000, 5: 25000}
@@ -123,16 +124,12 @@ async def on_ready():
     print(f"✅ MonthlyTax ready: {bot.user}")
     try:
         guild_obj = discord.Object(id=GUILD_ID)
-        synced = await bot.tree.sync(guild=guild_obj)
-        print(f"slash synced to guild {GUILD_ID}: {[c.name for c in synced]}")
+        synced = await bot.tree.sync(guild=guild_obj)   # ✅ зөвхөн membership guild
+        print(f"Membership guild sync: {[c.name for c in synced]}")
     except Exception as e:
-        print("guild sync error:", e)
-        try:
-            synced = await bot.tree.sync()
-            print(f"global slash synced: {[c.name for c in synced]}")
-        except Exception as e2:
-            print("global sync error:", e2)
+        print("Membership guild sync error:", e)
     tax_check.start()
+
 
 @bot.tree.command(name="mark_paid", description="Админ: хэрэглэгчийн сарын хураамжийг бүртгэнэ")
 @app_commands.describe(
@@ -481,5 +478,8 @@ async def tax_check():
         is_paid    = _is_paid_by(tier_val, paid_until, status)
 
         await _set_member_roles(guild, member, tier_head, is_paid)
+
+if __name__ == "__main__":
+    bot.run(TOKEN)
 
 bot.run(TOKEN)
