@@ -1255,6 +1255,10 @@ async def on_ready():
 
     # ⚙️ Slash командыг шууд guild рүү түр sync хийвэл шууд харагдана
     try:
+        if os.getenv("CLEAN_GLOBAL_CMDS") == "1":
+            bot.tree.clear_commands()
+            await bot.tree.sync()   # хоосон сетийг push → global арилна
+            print("🧹 Cleared ALL GLOBAL commands (one-time).")
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             synced = await bot.tree.sync(guild=guild)
