@@ -11,6 +11,7 @@ import re
 import discord
 from discord import app_commands, Embed
 from discord.ext import commands
+from discord.app_commands import checks 
 from dotenv import load_dotenv
 import asyncpg
 import openai
