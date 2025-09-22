@@ -16,7 +16,7 @@ import asyncpg
 import openai
 from asyncio import sleep
 from typing import List, Dict, Optional
-import math, random, os, PIL
+import math, ssl, random, os, PIL
 from typing import Dict, List
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageOps, ImageFont, ImageChops, __file__ as PIL_FILE
@@ -61,6 +61,18 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 GITHUB_REPO = os.getenv("GITHUB_REPO")
 GUILD_ID = int(os.getenv("GUILD_ID")) if os.getenv("GUILD_ID") else None
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set")
+
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+SSL_CTX = ssl.create_default_context()
+SSL_CTX.check_hostname = False
+SSL_CTX.verify_mode = ssl.CERT_NONE
+
+DB_COMMAND_TIMEOUT = 5  # секунд - query бүрийн дээд хугацаа
 # 🕰 Цагийн бүс
 MN_TZ = timezone(timedelta(hours=8))
 
@@ -114,7 +126,19 @@ def is_valid_tier(tier: str) -> bool:
 
 
 # load_dotenv()
-# DATABASE_URL = os.getenv("DATABASE_URL")
+
+
+def _print_db_url_sanitized():
+    try:
+        # Нууц үгийг масклах
+        from urllib.parse import urlparse
+        u = urlparse(DATABASE_URL)
+        masked = f"{u.scheme}://{u.username or ''}:********@{u.hostname}:{u.port or ''}{u.path}"
+        print(f"[DB] Using URL: {masked}")
+    except Exception as e:
+        print("[DB] URL parse error:", e)
+
+_print_db_url_sanitized()
 
 async def call_gpt_balance_api(team_count, players_per_team, players):
     import json
@@ -432,23 +456,13 @@ async def get_performance_emoji(uid: int) -> str:
     """
     rows, conn = [], None
     try:
-        from database import ensure_pool as _ensure, pool as _pool, connect as _connect
-        ok = await _ensure()
-        if ok and _pool is not None:
-            async with _pool.acquire() as c:
-                rows = await c.fetch(SQL, uid)
-        else:
-            conn = await _connect()
-            rows = await conn.fetch(SQL, uid)
+        from database import ensure_pool as _ensure, pool as _pool
+        await _ensure()
+        async with _pool.acquire() as c:
+            rows = await c.fetch(SQL, uid)
     except Exception as e:
         print(f"⚠️ get_performance_emoji алдаа: {uid} — {e}")
         return ""
-    finally:
-        if conn:
-            try:
-                await conn.close()
-            except:
-                pass
 
     if not rows:
         return "⏸"  # сүүлийн 12 цагт тоглоогүй (ялгаатай тэмдэг)
@@ -1193,6 +1207,32 @@ def _shorten(text: str | None, limit: int) -> str:
     s = (text or "-").strip().replace("\n", " ")
     return (s[:max(0, limit - 1)] + "…") if len(s) > limit else s
 
+async def safe_defer(interaction: discord.Interaction, *, ephemeral: bool = False, thinking: bool = True):
+    """Interaction-д давхар defer хийхэд аюулгүй wrapper."""
+    try:
+        if interaction.response.is_done():
+            # аль хэдийн defer/send хийгдсэн бол юу ч хийхгүй
+            return
+        await interaction.response.defer(ephemeral=ephemeral, thinking=thinking)
+    except discord.errors.InteractionResponded:
+        pass
+
+def is_admin_or_initiator(interaction: discord.Interaction, session: dict | None) -> bool:
+    if interaction.user.guild_permissions.administrator:
+        return True
+    try:
+        return session and interaction.user.id == int(session.get("initiator_id") or 0)
+    except Exception:
+        return False
+
+async def reply_ephemeral(interaction: discord.Interaction, text: str):
+    """response дууссан эсэхээс хамаарч зөв суваг руу буцаадаг."""
+    if interaction.response.is_done():
+        return await interaction.followup.send(text, ephemeral=True)
+    return await interaction.response.send_message(text, ephemeral=True)
+
+
+
 # 🧬 Start
 @bot.event
 async def on_ready():
@@ -1218,10 +1258,8 @@ async def on_ready():
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             synced = await bot.tree.sync(guild=guild)
-            print(f"🔁 Guild sync: {len(synced)} cmds")
         else:
             synced = await bot.tree.sync()
-            print(f"🔁 Global sync: {len(synced)} cmds")
     except Exception as e:
         print("❌ Command sync failed:", e)
 
@@ -2222,11 +2260,11 @@ async def undo_last_match(interaction: discord.Interaction):
 
         # ✅ Matches-с хамгийн сүүлийн match-ийг id-аар нь устгана
         try:
-            conn = await connect()
-            await conn.execute("DELETE FROM matches WHERE id = (SELECT MAX(id) FROM matches)")
-            await conn.close()
-        except Exception as e:
-            print("⚠️ matches-с устгах үед алдаа:", e)
+            con = await _db_acquire()
+            await con.execute("DELETE FROM matches WHERE id = (SELECT MAX(id) FROM matches)", timeout=5)
+        finally:
+            await _db_release(con)
+
 
         # ✅ Last match clear
         try:
@@ -2383,9 +2421,15 @@ async def player_stats(interaction: discord.Interaction):
         return
 
     uid = interaction.user.id
-    conn = await connect()
-    row = await conn.fetchrow("SELECT wins, losses FROM player_stats WHERE uid = $1", uid)
-    await conn.close()
+    con = await _db_acquire()
+    try:
+        row = await con.fetchrow(
+            "SELECT wins, losses FROM player_stats WHERE uid = $1",
+            uid,
+            timeout=5
+        )
+    finally:
+        await _db_release(con)
 
     if not row:
         await interaction.followup.send("⚠️ Таны статистик бүртгэлгүй байна.")
@@ -2996,23 +3040,23 @@ async def match_history(interaction: discord.Interaction):
         return
 
     try:
-        conn = await connect()
-        rows = await conn.fetch("""
-            SELECT timestamp, mode, strategy, initiator_id, winners, losers
-            FROM matches
-            ORDER BY timestamp DESC
-            LIMIT 5
-        """)
-        await conn.close()
+        con = await _db_acquire()
+        try:
+            rows = await con.fetch("""
+                SELECT timestamp, mode, strategy, initiator_id, winners, losers
+                FROM matches
+                ORDER BY timestamp DESC
+                LIMIT 5
+            """, timeout=6)
+        finally:
+            await _db_release(con)
+
     except Exception:
         import traceback
         traceback.print_exc()
         await interaction.followup.send("❌ Match унших үед алдаа гарлаа.")
         return
 
-    if not rows:
-        await interaction.followup.send("📭 Match бүртгэл хоосон байна.")
-        return
 
     lines = ["📜 **Сүүлийн Match-ууд:**"]
 
@@ -3066,22 +3110,31 @@ async def match_history(interaction: discord.Interaction):
 
     await interaction.followup.send("\n".join(lines))
 
+
 @bot.tree.command(name="resync", description="Slash командуудыг дахин бүртгэнэ (админ)")
+@checks.cooldown(1, 300.0)  # 5 минутанд 1 удаа
 async def resync(interaction: discord.Interaction):
-    try:
-        await interaction.response.defer(thinking=True)
-    except discord.errors.InteractionResponded:
-        return
-
+    # зөвхөн админ
     if not interaction.user.guild_permissions.administrator:
-        return await interaction.followup.send("⛔️ Зөвхөн админ ашиглана.", ephemeral=True)
+        return await interaction.response.send_message("⛔️ Зөвхөн админ.", ephemeral=True)
+
+    # defer (ephemeral)
+    try:
+        await interaction.response.defer(ephemeral=True, thinking=False)
+    except discord.errors.InteractionResponded:
+        pass
 
     try:
-        # ✅ хуучны үлдэгдлийг цэвэрлэж sync
-        bot.tree.clear_commands(guild=interaction.guild)
-        bot.tree.copy_global_to(guild=interaction.guild)
-        synced = await bot.tree.sync(guild=interaction.guild)
-        await interaction.followup.send(f"✅ {len(synced)} команд амжилттай дахин бүртгэгдлээ.", ephemeral=True)
+        if interaction.guild:
+            synced = await bot.tree.sync(guild=interaction.guild)  # ❗ цэвэрлэхгүй, зүгээр sync
+        else:
+            synced = await bot.tree.sync()
+        await interaction.followup.send(f"✅ {len(synced)} команд sync хийлээ.", ephemeral=True)
+    except discord.HTTPException as e:
+        # Discord талын 429 зөөлөн тайлбар
+        if getattr(e, "status", None) == 429:
+            return await interaction.followup.send("⏳ Discord rate-limit. Хэдэн минутын дараа дахин оролдоорой.", ephemeral=True)
+        raise
     except Exception as e:
         print("❌ resync алдаа:", e)
         await interaction.followup.send("⚠️ Комманд sync хийх үед алдаа гарлаа.", ephemeral=True)
@@ -3098,9 +3151,13 @@ async def diag(interaction: discord.Interaction):
     # DB
     db_ok, db_msg = False, ""
     try:
-        conn = await connect()
-        await conn.execute("SELECT 1")
-        await conn.close()
+        con = await _db_acquire()
+        try:
+            await con.execute("SELECT 1", timeout=3)
+            db_ok, db_msg = True, "DB OK"
+        finally:
+            await _db_release(con)
+
         db_ok, db_msg = True, "DB OK"
     except Exception as e:
         db_msg = f"DB FAIL: {e}"
