@@ -1256,27 +1256,28 @@ async def on_ready():
     # ⚙️ Slash командыг шууд guild рүү түр sync хийвэл шууд харагдана
     try:
         # --- ONE-TIME CLEANERS ---------------------------------
-        # 1) Global clean (хийчихсэн бол үлдээх/эсвэл комментлосон байж болно)
+        # (Хэрэв global-ыг бас нэг удаа цэвэрлэх бол энэ хэсгийг үлдээнэ)
         if os.getenv("CLEAN_GLOBAL_CMDS") == "1":
             bot.tree.clear_commands()
             await bot.tree.sync()
             print("🧹 Cleared ALL GLOBAL commands (one-time).")
 
-        # 2) Guild clean  ← ШИНЭ: membership команд BotRZR дээрээс алга болгоно
+        # ✅ GUILD CLEAN  ← BotRZR-аас хуучин/буруу командуудыг энэ серверээс тэглэнэ
         if os.getenv("CLEAN_GUILD_CMDS") == "1" and GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
-            bot.tree.clear_commands(guild=guild)     # энэ guild-ийн BotRZR бүх командыг устгана
-            await bot.tree.sync(guild=guild)         # хоосон сетийг push → тэр даруй арилна
+            bot.tree.clear_commands(guild=guild)     # ← АЛБААР guild= өгнө!
+            await bot.tree.sync(guild=guild)         # хоосон сет push → командууд тэр даруй алга болно
             print(f"🧹 Cleared GUILD commands for guild={GUILD_ID} (one-time).")
         # -------------------------------------------------------
 
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
-            synced = await bot.tree.sync(guild=guild)   # эндээс эхлэн зөвхөн BotRZR-ийн одоогийн команд бүртгэгдэнэ
+            synced = await bot.tree.sync(guild=guild)
         else:
             synced = await bot.tree.sync()
     except Exception as e:
         print("❌ Command sync failed:", e)
+
 
 
     asyncio.create_task(daily_nickname_refresh())
