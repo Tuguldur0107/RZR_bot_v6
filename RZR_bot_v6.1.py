@@ -14,7 +14,6 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncpg
 import openai
-import traceback
 from asyncio import sleep
 from typing import List, Dict, Optional
 import math, random, os, PIL
@@ -114,8 +113,8 @@ def is_valid_tier(tier: str) -> bool:
     return tier in TIER_ORDER
 
 
-load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
+# load_dotenv()
+# DATABASE_URL = os.getenv("DATABASE_URL")
 
 async def call_gpt_balance_api(team_count, players_per_team, players):
     import json
@@ -412,15 +411,15 @@ async def update_nicknames_for_users(guild, user_ids: list[int]):
         except Exception as e:
             print(f"⚠️ Nickname update алдаа: {uid} — {e}")
 
-async def ensure_pool() -> bool:
-    try:
-        if pool is None:
-            print("ℹ️ ensure_pool: initializing pool…")
-            await init_pool()  # database.py
-        return True
-    except Exception as e:
-        print(f"⚠️ ensure_pool error: {e}")
-        return False
+# async def ensure_pool() -> bool:
+#     try:
+#         if pool is None:
+#             print("ℹ️ ensure_pool: initializing pool…")
+#             await init_pool()  # database.py
+#         return True
+#     except Exception as e:
+#         print(f"⚠️ ensure_pool error: {e}")
+#         return False
     
 PERF_EMOJI_CAP = None  # None = хязгааргүй; жишээ нь 5 бол 5 хүртэл
 
@@ -1117,33 +1116,45 @@ def _num(n) -> str:
     
 KICK_VOTE_THRESHOLD = 10
 
+# async def _db_acquire(timeout: float = 2.0):
+#     """Pool-оос холбоод авч үзнэ; амжихгүй бол шууд connect() фоллбэк."""
+#     p = globals().get("pool", None)
+#     if p and getattr(p, "acquire", None):
+#         try:
+#             con = await asyncio.wait_for(p.acquire(), timeout=timeout)
+#             return con, True  # from_pool=True
+#         except Exception:
+#             pass  # pool гацсан/дүүрсэн байж болно
+
+#     url = os.getenv("DATABASE_URL")
+#     if not url:
+#         raise RuntimeError("DATABASE_URL is not set")
+#     con = await asyncpg.connect(url, command_timeout=5)
+#     return con, False  # from_pool=False
+
+# async def _db_release(con, from_pool: bool):
+#     try:
+#         if from_pool and globals().get("pool", None):
+#             await pool.release(con)
+#         else:
+#             await con.close()
+#     except Exception:
+#         pass
+    
 async def _db_acquire(timeout: float = 2.0):
-    """Pool-оос холбоод авч үзнэ; амжихгүй бол шууд connect() фоллбэк."""
-    p = globals().get("pool", None)
-    if p and getattr(p, "acquire", None):
-        try:
-            con = await asyncio.wait_for(p.acquire(), timeout=timeout)
-            return con, True  # from_pool=True
-        except Exception:
-            pass  # pool гацсан/дүүрсэн байж болно
+    # pool бэлэн биш байвал database.ensure_pool() дуудан бэлдэнэ
+    await ensure_pool()
+    return await asyncio.wait_for(pool.acquire(), timeout=timeout)
 
-    url = os.getenv("DATABASE_URL")
-    if not url:
-        raise RuntimeError("DATABASE_URL is not set")
-    con = await asyncpg.connect(url, command_timeout=5)
-    return con, False  # from_pool=False
-
-async def _db_release(con, from_pool: bool):
+async def _db_release(con):
     try:
-        if from_pool and globals().get("pool", None):
-            await pool.release(con)
-        else:
-            await con.close()
+        await pool.release(con)
     except Exception:
         pass
-    
+
+
 async def _insert_vote_and_count(guild_id: int, target_id: int, voter_id: int, reason: str | None):
-    con, from_pool = await _db_acquire()  # ⬅️ фоллбэктэй acquire
+    con = await _db_acquire()  # ⬅️ фоллбэктэй acquire
     try:
         row = await con.fetchrow(
             """
@@ -1162,7 +1173,7 @@ async def _insert_vote_and_count(guild_id: int, target_id: int, voter_id: int, r
         )
         return bool(row["inserted"]), int(row["count"])
     finally:
-        await _db_release(con, from_pool)
+        await _db_release(con)
 
 async def _can_kick(guild: discord.Guild, target: discord.Member) -> tuple[bool, str | None]:
     me = guild.me
@@ -3181,7 +3192,7 @@ async def kick_review_cmd(
     limit = max(1, min(limit, 25))
     DETAILS_PER_TARGET_MAX = 12
 
-    con, from_pool = await _db_acquire()
+    con = await _db_acquire()
     try:
         if user:
             rows = await con.fetch(
@@ -3324,12 +3335,12 @@ async def kick_review_cmd(
             return await interaction.followup.send(text, ephemeral=eph)
 
     finally:
-        await _db_release(con, from_pool)
+        await _db_release(con)
 
-intents = discord.Intents.default()
-client = discord.Client(intents=intents)
-tree = app_commands.CommandTree(client) 
-intents.message_content = True
+# intents = discord.Intents.default()
+# client = discord.Client(intents=intents)
+# tree = app_commands.CommandTree(client) 
+# intents.message_content = True
 @bot.tree.command(name="matchups", description="Хуваарилагдсан багуудыг санамсаргүй хослуулна (Scourge vs Sentinel)")
 @app_commands.describe(seed="Санамсаргүй сугалааны үр (optional)")
 async def matchups(interaction: discord.Interaction, seed: Optional[int] = None):
