@@ -1217,13 +1217,11 @@ async def on_ready():
     try:
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
-            bot.tree.clear_commands(guild=guild)            # хуучны үлдэгдэл цэвэрлэнэ
-            bot.tree.copy_global_to(guild=guild)
             synced = await bot.tree.sync(guild=guild)
             print(f"🔁 Guild sync: {len(synced)} cmds")
-        # global sync нэмэлтээр (сонголт)
-        await bot.tree.sync()
-        print("🔁 Global sync done")
+        else:
+            synced = await bot.tree.sync()
+            print(f"🔁 Global sync: {len(synced)} cmds")
     except Exception as e:
         print("❌ Command sync failed:", e)
 
