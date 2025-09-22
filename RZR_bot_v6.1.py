@@ -1255,17 +1255,29 @@ async def on_ready():
 
     # ⚙️ Slash командыг шууд guild рүү түр sync хийвэл шууд харагдана
     try:
+        # --- ONE-TIME CLEANERS ---------------------------------
+        # 1) Global clean (хийчихсэн бол үлдээх/эсвэл комментлосон байж болно)
         if os.getenv("CLEAN_GLOBAL_CMDS") == "1":
             bot.tree.clear_commands()
-            await bot.tree.sync()   # хоосон сетийг push → global арилна
+            await bot.tree.sync()
             print("🧹 Cleared ALL GLOBAL commands (one-time).")
+
+        # 2) Guild clean  ← ШИНЭ: membership команд BotRZR дээрээс алга болгоно
+        if os.getenv("CLEAN_GUILD_CMDS") == "1" and GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.clear_commands(guild=guild)     # энэ guild-ийн BotRZR бүх командыг устгана
+            await bot.tree.sync(guild=guild)         # хоосон сетийг push → тэр даруй арилна
+            print(f"🧹 Cleared GUILD commands for guild={GUILD_ID} (one-time).")
+        # -------------------------------------------------------
+
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
-            synced = await bot.tree.sync(guild=guild)
+            synced = await bot.tree.sync(guild=guild)   # эндээс эхлэн зөвхөн BotRZR-ийн одоогийн команд бүртгэгдэнэ
         else:
             synced = await bot.tree.sync()
     except Exception as e:
         print("❌ Command sync failed:", e)
+
 
     asyncio.create_task(daily_nickname_refresh())
     asyncio.create_task(initialize_bot())
