@@ -25,11 +25,11 @@ from io import StringIO
 
 # 🗄️ Local modules
 from database import (
-    pool, init_pool, ensure_pool,
+    init_pool, ensure_pool, get_pool,
 
     # 🎯 Score & tier
-    get_score, upsert_score, get_all_scores, get_default_tier,
-    promote_tier, demote_tier, get_player_stats, update_player_stats,
+    get_score, upsert_score, get_all_scores,
+    get_player_stats, update_player_stats,
 
     # 📊 Match
     save_last_match, get_last_match, insert_match, clear_last_match,
@@ -495,9 +495,9 @@ async def get_performance_emoji(uid: int) -> str:
     """
     rows, conn = [], None
     try:
-        from database import ensure_pool as _ensure, pool as _pool
-        await _ensure()
-        async with _pool.acquire() as c:
+        from database import get_pool
+        c_pool = await get_pool()
+        async with c_pool.acquire() as c:
             rows = await c.fetch(SQL, uid)
     except Exception as e:
         print(f"⚠️ get_performance_emoji алдаа: {uid} — {e}")
@@ -1195,16 +1195,16 @@ KICK_VOTE_THRESHOLD = 10
 #         pass
     
 async def _db_acquire(timeout: float = 2.0):
-    # pool бэлэн биш байвал database.ensure_pool() дуудан бэлдэнэ
     await ensure_pool()
-    return await asyncio.wait_for(pool.acquire(), timeout=timeout)
+    p = await get_pool()
+    return await asyncio.wait_for(p.acquire(), timeout=timeout)
 
 async def _db_release(con):
     try:
-        await pool.release(con)
+        p = await get_pool()
+        await p.release(con)
     except Exception:
         pass
-
 
 async def _insert_vote_and_count(guild_id: int, target_id: int, voter_id: int, reason: str | None):
     con = await _db_acquire()  # ⬅️ фоллбэктэй acquire
@@ -3501,9 +3501,10 @@ async def db_health(inter: discord.Interaction):
     await inter.response.defer(ephemeral=True, thinking=True)
     try:
         # database.ensure_pool() дотроо дууддаг — RZR-д аль хэдийн байна
-        from database import ensure_pool, pool as _pool
+        from database import get_pool, ensure_pool
         await ensure_pool()
-        async with _pool.acquire() as c:
+        p = await get_pool()
+        async with p.acquire() as c:
             v = await c.fetchval("SELECT 1")
         await inter.followup.send(f"DB OK: {v}", ephemeral=True)
     except Exception as e:

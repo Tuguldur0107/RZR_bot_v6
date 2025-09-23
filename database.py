@@ -7,6 +7,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
+pool: Optional[asyncpg.Pool] = None
+
 # ──────────────────────────────────────────────────────────────────────────────
 # ENV / DSN
 # ──────────────────────────────────────────────────────────────────────────────
@@ -40,6 +42,12 @@ POOL_MAX = 5
 TIMEOUT = 10
 MAX_INACTIVE = 60
 
+async def get_pool() -> asyncpg.Pool:
+    """Stable accessor: pool объектын албан ёсны гарц."""
+    await ensure_pool()
+    assert _pool is not None
+    return _pool
+
 async def init_pool() -> None:
     """Create pool with fallback to sslmode=require."""
     global _pool
@@ -63,6 +71,8 @@ async def init_pool() -> None:
                     command_timeout=TIMEOUT,
                     max_inactive_connection_lifetime=MAX_INACTIVE,
                 )
+                # ⬇️ public alias-аа синкдэж өгнө
+                globals()["pool"] = _pool
                 print(f"[POOL READY] DSN={masked} min={POOL_MIN} max={POOL_MAX} timeout={TIMEOUT}s")
                 return
             except Exception as e:
@@ -72,9 +82,11 @@ async def init_pool() -> None:
         raise RuntimeError(f"Failed to init pool: {last_exc!r}")
 
 async def ensure_pool() -> None:
-    global _pool
+    global _pool, pool
     if _pool is None or _pool._closed:
         await init_pool()
+    # alias үргэлж sync байг
+    pool = _pool
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Acquire wrapper + helpers (тайм-аут, логтой)
@@ -372,31 +384,31 @@ async def get_player_stats(uid_list: list[int]):
     return rows
 
 
-# # database.py (жишээ — өөрийн хүснэгт/талбарын нэртэй тааруул)
-# def get_current_teams(session_id: int):
-#     """
-#     Идэвхтэй session-ийн багуудыг авчирна.
-#     Хариу формат:
-#     [
-#       {"team_no": 1, "members": ["NickA", "NickB", ...]},
-#       {"team_no": 2, "members": ["NickC", "NickD", ...]},
-#       ...
-#     ]
-#     """
-#     with pool.connection() as conn, conn.cursor() as cur:
-#         # Доорх SQL-ийг өөрийн schema-д нийцүүлж тохируул:
-#         # Та playermap / match_players / teams гэх мэт хүснэгттэй бол түүнд тааруулж GROUP BY хийнэ.
-#         cur.execute(
-#             """
-#             SELECT team_no,
-#                    array_agg(player_nick ORDER BY player_nick) AS members
-#             FROM match_players
-#             WHERE session_id = %s
-#             GROUP BY team_no
-#             ORDER BY team_no;
-#             """,
-#             (session_id,)
-#         )
-#         rows = cur.fetchall()
-#         return [{"team_no": r[0], "members": list(r[1] or [])} for r in rows]
+# database.py (жишээ — өөрийн хүснэгт/талбарын нэртэй тааруул)
+def get_current_teams(session_id: int):
+    """
+    Идэвхтэй session-ийн багуудыг авчирна.
+    Хариу формат:
+    [
+      {"team_no": 1, "members": ["NickA", "NickB", ...]},
+      {"team_no": 2, "members": ["NickC", "NickD", ...]},
+      ...
+    ]
+    """
+    with pool.connection() as conn, conn.cursor() as cur:
+        # Доорх SQL-ийг өөрийн schema-д нийцүүлж тохируул:
+        # Та playermap / match_players / teams гэх мэт хүснэгттэй бол түүнд тааруулж GROUP BY хийнэ.
+        cur.execute(
+            """
+            SELECT team_no,
+                   array_agg(player_nick ORDER BY player_nick) AS members
+            FROM match_players
+            WHERE session_id = %s
+            GROUP BY team_no
+            ORDER BY team_no;
+            """,
+            (session_id,)
+        )
+        rows = cur.fetchall()
+        return [{"team_no": r[0], "members": list(r[1] or [])} for r in rows]
 
