@@ -1242,9 +1242,8 @@ async def on_ready():
     await init_pool()
     print("✅ DB pool амжилттай эхэллээ.")
 
-    # ✅ Donor cog-оо ачаалнах (эвэрхий нь Unknown Integration-г арилгана)
+    # ✅ Donor cog
     try:
-        # давхар нэмэгдэхээс сэргийлж өмнө нь байвал алгасъя
         if not bot.get_cog("Donor"):
             await bot.add_cog(Donor(bot))
             print("✅ Donor cog loaded")
@@ -1253,38 +1252,46 @@ async def on_ready():
     except Exception as e:
         print("❌ Donor cog load fail:", e)
 
-    # ⚙️ Slash командыг шууд guild рүү түр sync хийвэл шууд харагдана
+    # --- HARD PURGE (optional; one-time) ------------------------------
+    if os.getenv("PURGE_GLOBAL_ON_START") == "1":
+        try:
+            await bot.http.bulk_upsert_global_commands(bot.user.id, [])
+            print("🧨 Global registry PURGED (RZR).")
+        except Exception as e:
+            print("❌ Global purge failed (RZR):", e)
+
+    if os.getenv("PURGE_GUILD_ON_START") == "1" and GUILD_ID:
+        try:
+            await bot.http.bulk_upsert_guild_commands(bot.user.id, int(GUILD_ID), [])
+            print(f"🧨 Guild registry PURGED for {GUILD_ID} (RZR).")
+        except Exception as e:
+            print("❌ Guild purge failed (RZR):", e)
+    # ------------------------------------------------------------------
+
     try:
-        # --- ONE-TIME CLEANERS ---------------------------------
-        # (Хэрэв global-ыг бас нэг удаа цэвэрлэх бол энэ хэсгийг үлдээнэ)
         if os.getenv("CLEAN_GUILD_CMDS") == "1" and GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             bot.tree.clear_commands(guild=guild)
             await bot.tree.sync(guild=guild)
-            print("🧹 Cleared ALL GLOBAL commands (one-time).")
+            print(f"🧹 Cleared GUILD commands for {GUILD_ID} (one-time).")
 
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             synced = await bot.tree.sync(guild=guild)
         else:
             synced = await bot.tree.sync()
+        print(f"RZR guild sync: {[c.name for c in synced]}")
     except Exception as e:
         print("❌ Command sync failed:", e)
-
-    asyncio.create_task(daily_nickname_refresh())
-    asyncio.create_task(initialize_bot())
-    asyncio.create_task(session_timeout_checker())
 
     print(f"APP_ID env     : {os.getenv('DISCORD_APP_ID')}")
     print(f"bot.user       : {bot.user}   (id={bot.user.id})")
     print(f"will sync guild: {GUILD_ID}")
 
-async def initialize_bot():
-    try:
-        await load_session_state()
-        print("📥 Session state амжилттай ачаалагдлаа.")
-    except Exception as e:
-        print("❌ Session ачаалах үед алдаа гарлаа:", e)
+    asyncio.create_task(daily_nickname_refresh())
+    asyncio.create_task(initialize_bot())
+    asyncio.create_task(session_timeout_checker())
+
 
 # 🧩 Command: ping
 @bot.tree.command(name="ping", description="Bot-ийн latency-г шалгана")

@@ -122,17 +122,35 @@ def _format_member_rows(rows):
 @bot.event
 async def on_ready():
     print(f"✅ MonthlyTax ready: {bot.user}")
-    
     print(f"APP_ID env     : {os.getenv('DISCORD_APP_ID')}")
     print(f"bot.user       : {bot.user}   (id={bot.user.id})")
     print(f"will sync guild: {GUILD_ID}")
+
+    # --- HARD PURGE (optional; one-time) ------------------------------
+    if os.getenv("PURGE_GLOBAL_ON_START") == "1":
+        try:
+            await bot.http.bulk_upsert_global_commands(bot.user.id, [])
+            print("🧨 Global registry PURGED (MonthlyTax).")
+        except Exception as e:
+            print("❌ Global purge failed (MonthlyTax):", e)
+
+    if os.getenv("PURGE_GUILD_ON_START") == "1" and GUILD_ID:
+        try:
+            await bot.http.bulk_upsert_guild_commands(bot.user.id, int(GUILD_ID), [])
+            print(f"🧨 Guild registry PURGED for {GUILD_ID} (MonthlyTax).")
+        except Exception as e:
+            print("❌ Guild purge failed (MonthlyTax):", e)
+    # ------------------------------------------------------------------
+
     try:
         guild_obj = discord.Object(id=GUILD_ID)
         synced = await bot.tree.sync(guild=guild_obj)   # ✅ зөвхөн membership guild
         print(f"Membership guild sync: {[c.name for c in synced]}")
     except Exception as e:
         print("Membership guild sync error:", e)
+
     tax_check.start()
+
 
 
 @bot.tree.command(name="mark_paid", description="Админ: хэрэглэгчийн сарын хураамжийг бүртгэнэ")
