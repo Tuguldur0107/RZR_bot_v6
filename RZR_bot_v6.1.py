@@ -3500,11 +3500,15 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
 async def db_health(inter: discord.Interaction):
     await inter.response.defer(ephemeral=True, thinking=True)
     try:
-        async with pool.acquire() as conn:
-            v = await run_db("health", conn.fetchval("SELECT 1"))
+        # database.ensure_pool() дотроо дууддаг — RZR-д аль хэдийн байна
+        from database import ensure_pool, pool as _pool
+        await ensure_pool()
+        async with _pool.acquire() as c:
+            v = await c.fetchval("SELECT 1")
         await inter.followup.send(f"DB OK: {v}", ephemeral=True)
     except Exception as e:
         await inter.followup.send(f"DB FAIL: {e}", ephemeral=True)
+
 
 # 🎯 Run
 async def main():
