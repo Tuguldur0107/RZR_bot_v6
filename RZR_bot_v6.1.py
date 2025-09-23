@@ -80,14 +80,26 @@ MN_TZ = timezone(timedelta(hours=8))
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
 
+# --- SETUP HOOK -------------------------------------------------------------
+# bot = commands.Bot(...) мөрийн ДАРАА яг энд байрлана
 GUILD_OBJ = discord.Object(id=int(GUILD_ID))
 
 async def setup_hook():
+    # 0) DB POOL ЭХЛҮҮЛЭХ — команд sync-ээс ӨМНӨ
+    try:
+        await init_pool()     # database.py дотор байгаа
+        print("✅ DB pool эхэллээ (setup_hook)")
+    except Exception as e:
+        print("❌ DB pool init алдаа (setup_hook):", e)
+        # pool байхгүй байсан ч командууд дээр ensure_pool() дуудагдана
+
+    # 1) тухайн guild дээрх бүртгэлийг тэглээд (safety)
     try:
         bot.tree.clear_commands(guild=GUILD_OBJ)
     except Exception as e:
         print("clear guild cmds err (RZR):", e)
 
+    # 2) локал модноос бүх командыг guild scope руу нэмнэ
     try:
         for cmd in bot.tree.get_commands():
             bot.tree.add_command(cmd, guild=GUILD_OBJ)
@@ -95,6 +107,7 @@ async def setup_hook():
     except Exception as e:
         print("add_command err (RZR):", e)
 
+    # 3) sync
     try:
         synced = await bot.tree.sync(guild=GUILD_OBJ)
         print(f"✅ guild sync OK (RZR): {[c.name for c in synced]}")
@@ -102,6 +115,8 @@ async def setup_hook():
         print("❌ guild sync failed (RZR):", e)
 
 bot.setup_hook = setup_hook
+# ---------------------------------------------------------------------------
+
 
 
 # ⚙️ Tier config (1-1 → 5-5)
@@ -1269,9 +1284,6 @@ async def on_ready():
     print(f"🤖 RZR Bot нэвтэрлээ: {bot.user}")
     print("📁 Working directory:", os.getcwd())
 
-    await init_pool()
-    print("✅ DB pool амжилттай эхэллээ.")
-
     try:
         if not bot.get_cog("Donor"):
             await bot.add_cog(Donor(bot))
@@ -1282,16 +1294,11 @@ async def on_ready():
         print("❌ Donor cog load fail:", e)
 
     try:
-        # Локал мод дахь командуудыг харуулъя
         local_cmds = [c.name for c in bot.tree.get_commands()]
         print(f"LOCAL tree commands ({len(local_cmds)}): {local_cmds}")
 
-        # Guild дээр sync хийе
-        if GUILD_ID:
-            guild = discord.Object(id=GUILD_ID)
-            synced = await bot.tree.sync(guild=guild)
-        else:
-            synced = await bot.tree.sync()
+        guild = discord.Object(id=GUILD_ID)
+        synced = await bot.tree.sync(guild=guild)
         print(f"RZR guild sync ({len(synced)}): {[c.name for c in synced]}")
     except Exception as e:
         print("❌ Command sync failed:", e)
@@ -1303,6 +1310,7 @@ async def on_ready():
     asyncio.create_task(daily_nickname_refresh())
     asyncio.create_task(initialize_bot())
     asyncio.create_task(session_timeout_checker())
+
 
 
 # 🧩 Command: ping
