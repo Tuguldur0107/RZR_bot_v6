@@ -452,7 +452,6 @@ async def apply_membership_lock(interaction: discord.Interaction, pay_channel: d
 
     await interaction.followup.send(f"✅ Бүх сувгийн зөвшөөрөл шинэчлэв. Нийт: **{changed}**", ephemeral=True)
 
-# ---- FORCE SYNC VIA PREFIX COMMANDS (for debugging) ----
 @bot.command(name="sync_here")
 @commands.has_permissions(administrator=True)
 async def sync_here(ctx: commands.Context):
