@@ -126,39 +126,20 @@ async def on_ready():
     print(f"bot.user       : {bot.user}   (id={bot.user.id})")
     print(f"will sync guild: {GUILD_ID}")
 
-    # --- HARD PURGE (optional; one-time) ------------------------------
-    if os.getenv("PURGE_GLOBAL_ON_START") == "1":
-        try:
-            await bot.http.bulk_upsert_global_commands(bot.user.id, [])
-            print("🧨 Global registry PURGED (MonthlyTax).")
-        except Exception as e:
-            print("❌ Global purge failed (MonthlyTax):", e)
-
-    if os.getenv("PURGE_GUILD_ON_START") == "1" and GUILD_ID:
-        try:
-            await bot.http.bulk_upsert_guild_commands(bot.user.id, int(GUILD_ID), [])
-            print(f"🧨 Guild registry PURGED for {GUILD_ID} (MonthlyTax).")
-        except Exception as e:
-            print("❌ Guild purge failed (MonthlyTax):", e)
-    # ------------------------------------------------------------------
-
-    # ❗ Локал мод дотор үнэхээр команд бүртгэгдсэн эсэхийг шалгая
     try:
-        local_cmds = [c.name for c in bot.tree.get_commands()]  # локал бүртгэл
-        print(f"LOCAL tree commands count: {len(local_cmds)}")
-        print(f"LOCAL tree commands: {local_cmds}")
-    except Exception as e:
-        print("❌ Cannot read local tree:", e)
+        # Локал мод дахь бүх slash командын нэрсийг харуулъя
+        local_cmds = [c.name for c in bot.tree.get_commands()]
+        print(f"LOCAL tree commands ({len(local_cmds)}): {local_cmds}")
 
-    # ✅ зөвхөн membership guild рүү sync
-    try:
+        # Guild дээр sync хийе
         guild_obj = discord.Object(id=int(GUILD_ID))
         synced = await bot.tree.sync(guild=guild_obj)
-        print(f"Membership guild sync: {[c.name for c in synced]}")
+        print(f"Membership guild sync ({len(synced)}): {[c.name for c in synced]}")
     except Exception as e:
-        print("Membership guild sync error:", e)
+        print("❌ Membership guild sync error:", e)
 
     tax_check.start()
+
 
 @bot.tree.command(name="mark_paid", description="Админ: хэрэглэгчийн сарын хураамжийг бүртгэнэ")
 @app_commands.describe(

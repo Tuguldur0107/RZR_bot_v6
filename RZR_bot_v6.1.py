@@ -1231,18 +1231,23 @@ async def reply_ephemeral(interaction: discord.Interaction, text: str):
         return await interaction.followup.send(text, ephemeral=True)
     return await interaction.response.send_message(text, ephemeral=True)
 
+async def initialize_bot():
+    try:
+        await load_session_state()
+        print("📥 Session state амжилттай ачаалагдлаа.")
+    except Exception as e:
+        print("❌ Session ачаалах үед алдаа гарлаа:", e)
 
 
 # 🧬 Start
 @bot.event
 async def on_ready():
-    print(f"🤖 Bot нэвтэрлээ: {bot.user}")
+    print(f"🤖 RZR Bot нэвтэрлээ: {bot.user}")
     print("📁 Working directory:", os.getcwd())
 
     await init_pool()
     print("✅ DB pool амжилттай эхэллээ.")
 
-    # ✅ Donor cog
     try:
         if not bot.get_cog("Donor"):
             await bot.add_cog(Donor(bot))
@@ -1252,35 +1257,18 @@ async def on_ready():
     except Exception as e:
         print("❌ Donor cog load fail:", e)
 
-    # --- HARD PURGE (optional; one-time) ------------------------------
-    if os.getenv("PURGE_GLOBAL_ON_START") == "1":
-        try:
-            await bot.http.bulk_upsert_global_commands(bot.user.id, [])
-            print("🧨 Global registry PURGED (RZR).")
-        except Exception as e:
-            print("❌ Global purge failed (RZR):", e)
-
-    if os.getenv("PURGE_GUILD_ON_START") == "1" and GUILD_ID:
-        try:
-            await bot.http.bulk_upsert_guild_commands(bot.user.id, int(GUILD_ID), [])
-            print(f"🧨 Guild registry PURGED for {GUILD_ID} (RZR).")
-        except Exception as e:
-            print("❌ Guild purge failed (RZR):", e)
-    # ------------------------------------------------------------------
-
     try:
-        if os.getenv("CLEAN_GUILD_CMDS") == "1" and GUILD_ID:
-            guild = discord.Object(id=GUILD_ID)
-            bot.tree.clear_commands(guild=guild)
-            await bot.tree.sync(guild=guild)
-            print(f"🧹 Cleared GUILD commands for {GUILD_ID} (one-time).")
+        # Локал мод дахь командуудыг харуулъя
+        local_cmds = [c.name for c in bot.tree.get_commands()]
+        print(f"LOCAL tree commands ({len(local_cmds)}): {local_cmds}")
 
+        # Guild дээр sync хийе
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             synced = await bot.tree.sync(guild=guild)
         else:
             synced = await bot.tree.sync()
-        print(f"RZR guild sync: {[c.name for c in synced]}")
+        print(f"RZR guild sync ({len(synced)}): {[c.name for c in synced]}")
     except Exception as e:
         print("❌ Command sync failed:", e)
 
