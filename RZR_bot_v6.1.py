@@ -1257,19 +1257,11 @@ async def on_ready():
     try:
         # --- ONE-TIME CLEANERS ---------------------------------
         # (Хэрэв global-ыг бас нэг удаа цэвэрлэх бол энэ хэсгийг үлдээнэ)
-        if os.getenv("CLEAN_GUILD_CMDS") == "1" and GUILD_ID:
-            guild = discord.Object(id=GUILD_ID)
-            bot.tree.clear_commands(guild=guild)
-            await bot.tree.sync(guild=guild)
-            print("🧹 Cleared ALL GLOBAL commands (one-time).")
-
-        # ✅ GUILD CLEAN  ← BotRZR-аас хуучин/буруу командуудыг энэ серверээс тэглэнэ
-        if os.getenv("CLEAN_GUILD_CMDS") == "1" and GUILD_ID:
-            guild = discord.Object(id=GUILD_ID)
-            bot.tree.clear_commands(guild=guild)     # ← АЛБААР guild= өгнө!
-            await bot.tree.sync(guild=guild)         # хоосон сет push → командууд тэр даруй алга болно
-            print(f"🧹 Cleared GUILD commands for guild={GUILD_ID} (one-time).")
-        # -------------------------------------------------------
+        # if os.getenv("CLEAN_GUILD_CMDS") == "1" and GUILD_ID:
+        #     guild = discord.Object(id=GUILD_ID)
+        #     bot.tree.clear_commands(guild=guild)
+        #     await bot.tree.sync(guild=guild)
+        #     print("🧹 Cleared ALL GLOBAL commands (one-time).")
 
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)

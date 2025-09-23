@@ -481,5 +481,3 @@ async def tax_check():
 
 if __name__ == "__main__":
     bot.run(TOKEN)
-
-bot.run(TOKEN)
