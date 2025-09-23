@@ -1257,11 +1257,11 @@ async def on_ready():
     try:
         # --- ONE-TIME CLEANERS ---------------------------------
         # (Хэрэв global-ыг бас нэг удаа цэвэрлэх бол энэ хэсгийг үлдээнэ)
-        # if os.getenv("CLEAN_GUILD_CMDS") == "1" and GUILD_ID:
-        #     guild = discord.Object(id=GUILD_ID)
-        #     bot.tree.clear_commands(guild=guild)
-        #     await bot.tree.sync(guild=guild)
-        #     print("🧹 Cleared ALL GLOBAL commands (one-time).")
+        if os.getenv("CLEAN_GUILD_CMDS") == "1" and GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.clear_commands(guild=guild)
+            await bot.tree.sync(guild=guild)
+            print("🧹 Cleared ALL GLOBAL commands (one-time).")
 
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
@@ -1270,8 +1270,6 @@ async def on_ready():
             synced = await bot.tree.sync()
     except Exception as e:
         print("❌ Command sync failed:", e)
-
-
 
     asyncio.create_task(daily_nickname_refresh())
     asyncio.create_task(initialize_bot())
