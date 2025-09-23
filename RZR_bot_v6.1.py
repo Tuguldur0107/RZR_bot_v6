@@ -1274,6 +1274,11 @@ async def on_ready():
     asyncio.create_task(daily_nickname_refresh())
     asyncio.create_task(initialize_bot())
     asyncio.create_task(session_timeout_checker())
+
+    print(f"APP_ID env     : {os.getenv('DISCORD_APP_ID')}")
+    print(f"bot.user       : {bot.user}   (id={bot.user.id})")
+    print(f"will sync guild: {GUILD_ID}")
+
 async def initialize_bot():
     try:
         await load_session_state()

@@ -122,6 +122,10 @@ def _format_member_rows(rows):
 @bot.event
 async def on_ready():
     print(f"✅ MonthlyTax ready: {bot.user}")
+    
+    print(f"APP_ID env     : {os.getenv('DISCORD_APP_ID')}")
+    print(f"bot.user       : {bot.user}   (id={bot.user.id})")
+    print(f"will sync guild: {GUILD_ID}")
     try:
         guild_obj = discord.Object(id=GUILD_ID)
         synced = await bot.tree.sync(guild=guild_obj)   # ✅ зөвхөн membership guild
