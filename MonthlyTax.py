@@ -142,16 +142,23 @@ async def on_ready():
             print("❌ Guild purge failed (MonthlyTax):", e)
     # ------------------------------------------------------------------
 
+    # ❗ Локал мод дотор үнэхээр команд бүртгэгдсэн эсэхийг шалгая
     try:
-        guild_obj = discord.Object(id=GUILD_ID)
-        synced = await bot.tree.sync(guild=guild_obj)   # ✅ зөвхөн membership guild
+        local_cmds = [c.name for c in bot.tree.get_commands()]  # локал бүртгэл
+        print(f"LOCAL tree commands count: {len(local_cmds)}")
+        print(f"LOCAL tree commands: {local_cmds}")
+    except Exception as e:
+        print("❌ Cannot read local tree:", e)
+
+    # ✅ зөвхөн membership guild рүү sync
+    try:
+        guild_obj = discord.Object(id=int(GUILD_ID))
+        synced = await bot.tree.sync(guild=guild_obj)
         print(f"Membership guild sync: {[c.name for c in synced]}")
     except Exception as e:
         print("Membership guild sync error:", e)
 
     tax_check.start()
-
-
 
 @bot.tree.command(name="mark_paid", description="Админ: хэрэглэгчийн сарын хураамжийг бүртгэнэ")
 @app_commands.describe(
