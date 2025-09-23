@@ -19,6 +19,33 @@ intents = discord.Intents.default()
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+
+GUILD_OBJ = discord.Object(id=int(GUILD_ID))
+
+async def setup_hook():
+    # 1) тухайн guild дээрх бүртгэлийг тэглээд
+    try:
+        bot.tree.clear_commands(guild=GUILD_OBJ)
+    except Exception as e:
+        print("clear guild cmds err:", e)
+
+    # 2) локал модноос бүх командыг guild scope руу **шууд нэмнэ**
+    try:
+        for cmd in bot.tree.get_commands():
+            bot.tree.add_command(cmd, guild=GUILD_OBJ)
+        print("➕ added local cmds → guild (MonthlyTax)")
+    except Exception as e:
+        print("add_command err (MonthlyTax):", e)
+
+    # 3) синк
+    try:
+        synced = await bot.tree.sync(guild=GUILD_OBJ)
+        print(f"✅ guild sync OK (MonthlyTax): {[c.name for c in synced]}")
+    except Exception as e:
+        print("❌ guild sync failed (MonthlyTax):", e)
+
+bot.setup_hook = setup_hook
+
 # DB connection
 async def db():
     return await asyncpg.connect(DATABASE_URL)

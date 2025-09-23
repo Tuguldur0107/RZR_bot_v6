@@ -80,6 +80,30 @@ MN_TZ = timezone(timedelta(hours=8))
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
 
+GUILD_OBJ = discord.Object(id=int(GUILD_ID))
+
+async def setup_hook():
+    try:
+        bot.tree.clear_commands(guild=GUILD_OBJ)
+    except Exception as e:
+        print("clear guild cmds err (RZR):", e)
+
+    try:
+        for cmd in bot.tree.get_commands():
+            bot.tree.add_command(cmd, guild=GUILD_OBJ)
+        print("➕ added local cmds → guild (RZR)")
+    except Exception as e:
+        print("add_command err (RZR):", e)
+
+    try:
+        synced = await bot.tree.sync(guild=GUILD_OBJ)
+        print(f"✅ guild sync OK (RZR): {[c.name for c in synced]}")
+    except Exception as e:
+        print("❌ guild sync failed (RZR):", e)
+
+bot.setup_hook = setup_hook
+
+
 # ⚙️ Tier config (1-1 → 5-5)
 TIER_ORDER = [
     "5-5", "5-4", "5-3", "5-2", "5-1",
