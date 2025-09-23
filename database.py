@@ -385,30 +385,30 @@ async def get_player_stats(uid_list: list[int]):
 
 
 # database.py (жишээ — өөрийн хүснэгт/талбарын нэртэй тааруул)
-def get_current_teams(session_id: int):
-    """
-    Идэвхтэй session-ийн багуудыг авчирна.
-    Хариу формат:
-    [
-      {"team_no": 1, "members": ["NickA", "NickB", ...]},
-      {"team_no": 2, "members": ["NickC", "NickD", ...]},
-      ...
-    ]
-    """
-    with pool.connection() as conn, conn.cursor() as cur:
-        # Доорх SQL-ийг өөрийн schema-д нийцүүлж тохируул:
-        # Та playermap / match_players / teams гэх мэт хүснэгттэй бол түүнд тааруулж GROUP BY хийнэ.
-        cur.execute(
-            """
-            SELECT team_no,
-                   array_agg(player_nick ORDER BY player_nick) AS members
-            FROM match_players
-            WHERE session_id = %s
-            GROUP BY team_no
-            ORDER BY team_no;
-            """,
-            (session_id,)
-        )
-        rows = cur.fetchall()
-        return [{"team_no": r[0], "members": list(r[1] or [])} for r in rows]
+# def get_current_teams(session_id: int):
+#     """
+#     Идэвхтэй session-ийн багуудыг авчирна.
+#     Хариу формат:
+#     [
+#       {"team_no": 1, "members": ["NickA", "NickB", ...]},
+#       {"team_no": 2, "members": ["NickC", "NickD", ...]},
+#       ...
+#     ]
+#     """
+#     with pool.connection() as conn, conn.cursor() as cur:
+#         # Доорх SQL-ийг өөрийн schema-д нийцүүлж тохируул:
+#         # Та playermap / match_players / teams гэх мэт хүснэгттэй бол түүнд тааруулж GROUP BY хийнэ.
+#         cur.execute(
+#             """
+#             SELECT team_no,
+#                    array_agg(player_nick ORDER BY player_nick) AS members
+#             FROM match_players
+#             WHERE session_id = %s
+#             GROUP BY team_no
+#             ORDER BY team_no;
+#             """,
+#             (session_id,)
+#         )
+#         rows = cur.fetchall()
+#         return [{"team_no": r[0], "members": list(r[1] or [])} for r in rows]
 
