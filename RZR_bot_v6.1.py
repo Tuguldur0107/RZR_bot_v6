@@ -3488,6 +3488,15 @@ async def matchups(interaction: discord.Interaction, seed: Optional[int] = None)
     emb.set_footer(text=("Seed: {}".format(seed) if seed is not None else "Random every time"))
     await interaction.followup.send(embed=emb)
 
+@bot.tree.command(name="db_health", description="DB roundtrip test")
+async def db_health(inter: discord.Interaction):
+    await inter.response.defer(ephemeral=True, thinking=True)
+    try:
+        async with pool.acquire() as conn:
+            v = await run_db("health", conn.fetchval("SELECT 1"))
+        await inter.followup.send(f"DB OK: {v}", ephemeral=True)
+    except Exception as e:
+        await inter.followup.send(f"DB FAIL: {e}", ephemeral=True)
 
 # 🎯 Run
 async def main():
