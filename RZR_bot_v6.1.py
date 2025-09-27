@@ -24,7 +24,7 @@ from io import BytesIO
 from io import StringIO
 
 # 🗄️ Local modules
-from database import (
+from database_v1 import (
     init_pool, ensure_pool, get_pool,
 
     # 🎯 Score & tier
@@ -428,7 +428,7 @@ def clean_nickname(nick: str) -> str:
     return nick.strip()
 
 async def update_nicknames_for_users(guild, user_ids: list[int]):
-    from database import get_all_donators, get_score
+    from database_v1 import get_all_donators, get_score
     donors = await get_all_donators()
 
     MAX_LEN = 32
@@ -495,7 +495,7 @@ async def get_performance_emoji(uid: int) -> str:
     """
     rows, conn = [], None
     try:
-        from database import get_pool
+        from database_v1 import get_pool
         c_pool = await get_pool()
         async with c_pool.acquire() as c:
             rows = await c.fetch(SQL, uid)
@@ -1168,31 +1168,6 @@ def _num(n) -> str:
         return str(n)
     
 KICK_VOTE_THRESHOLD = 10
-
-# async def _db_acquire(timeout: float = 2.0):
-#     """Pool-оос холбоод авч үзнэ; амжихгүй бол шууд connect() фоллбэк."""
-#     p = globals().get("pool", None)
-#     if p and getattr(p, "acquire", None):
-#         try:
-#             con = await asyncio.wait_for(p.acquire(), timeout=timeout)
-#             return con, True  # from_pool=True
-#         except Exception:
-#             pass  # pool гацсан/дүүрсэн байж болно
-
-#     url = os.getenv("DATABASE_URL")
-#     if not url:
-#         raise RuntimeError("DATABASE_URL is not set")
-#     con = await asyncpg.connect(url, command_timeout=5)
-#     return con, False  # from_pool=False
-
-# async def _db_release(con, from_pool: bool):
-#     try:
-#         if from_pool and globals().get("pool", None):
-#             await pool.release(con)
-#         else:
-#             await con.close()
-#     except Exception:
-#         pass
     
 async def _db_acquire(timeout: float = 2.0):
     await ensure_pool()
@@ -1317,8 +1292,6 @@ async def on_ready():
 @bot.tree.command(name="ping", description="Bot-ийн latency-г шалгана")
 async def ping(interaction: discord.Interaction):
     await interaction.response.send_message("🏓 Pong!")
-
-START_MATCH_BANNER = Path("assets/Start_match.png")
 
 @bot.tree.command(name="start_match", description="Session эхлүүлнэ (шинэ тоглолтын session)")
 async def start_match(interaction: discord.Interaction):
@@ -2329,7 +2302,7 @@ async def undo_last_match(interaction: discord.Interaction):
     except Exception as e:
         print("❌ Match буцаах үед алдаа гарлаа:", e)
         await interaction.followup.send("❌ Match буцаах үед алдаа гарлаа.")
-
+ 
 @bot.tree.command(name="my_score", description="Таны tier, score, weight-ийг харуулна")
 async def my_score(interaction: discord.Interaction):
     try:
@@ -2643,7 +2616,7 @@ class Donor(commands.Cog):
         await interaction.response.defer()
 
         # 1. DB update
-        from database import upsert_donator
+        from database_v1 import upsert_donator
         try:
             await upsert_donator(member.id, amount_mnt)
         except Exception as e:
@@ -3501,7 +3474,7 @@ async def db_health(inter: discord.Interaction):
     await inter.response.defer(ephemeral=True, thinking=True)
     try:
         # database.ensure_pool() дотроо дууддаг — RZR-д аль хэдийн байна
-        from database import get_pool, ensure_pool
+        from database_v1 import get_pool, ensure_pool
         await ensure_pool()
         p = await get_pool()
         async with p.acquire() as c:
