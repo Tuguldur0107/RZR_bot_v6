@@ -6,7 +6,7 @@ import datetime as dt
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-from database import init_pool
+from database_v1 import init_pool
 
 # Tier → monthly fee map (₮)
 TIERS = {1: 0, 2: 10000, 3: 15000, 4: 20000, 5: 25000}
