@@ -146,6 +146,22 @@ def _format_member_rows(rows):
         lines.append(f"- <@{r['uid']}> | {uname} | tier: {r['tier']} | until: {until}")
     return "\n".join(lines) if lines else "Жагсаалт хоосон."
 
+# Markdown файлын зам
+DOC_PATH = os.path.join(os.path.dirname(__file__), "Info", "MonthlyFeeCommands.md")
+
+def _split_blocks(text: str, limit: int = 1900):
+    """Discord 2000 тэмдэгтийн лимитээс хэтрэхгүйгээр тасалж буцаана."""
+    blocks, cur, n = [], [], 0
+    for line in text.splitlines():
+        ln = len(line) + 1
+        if n + ln > limit:
+            blocks.append("\n".join(cur)); cur = [line]; n = ln
+        else:
+            cur.append(line); n += ln
+    if cur:
+        blocks.append("\n".join(cur))
+    return blocks
+
 @bot.event
 async def on_ready():
     print(f"✅ MonthlyTax ready: {bot.user}")
@@ -473,6 +489,31 @@ async def sync_global(ctx: commands.Context):
         await ctx.reply(f"🌐 Global sync ok: {names}", mention_author=False)
     except Exception as e:
         await ctx.reply(f"⚠️ global sync error: `{e}`", mention_author=False)
+
+@bot.tree.command(name="monthlyfee_docs", description="Monthly Fee командын тайлбар (Markdown)")
+@app_commands.checks.has_permissions(administrator=True)   # зөвхөн админ
+@app_commands.describe(as_file="Файлаар илгээх эсэх (true/false)")
+async def monthlyfee_docs(interaction: discord.Interaction, as_file: bool = False):
+    await interaction.response.defer(ephemeral=False)  # бүгдэд харагдана
+    if not os.path.isfile(DOC_PATH):
+        await interaction.followup.send(f"⚠️ Файл олдсонгүй: `{DOC_PATH}`", ephemeral=False)
+        return
+
+    if as_file:
+        await interaction.followup.send(
+            content="📄 **Monthly Fee** командын тайлбар хавсаргалаа.",
+            file=discord.File(DOC_PATH, filename="MonthlyFeeCommands.md"),
+            ephemeral=False
+        )
+        return
+
+    with open(DOC_PATH, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    for i, part in enumerate(_split_blocks(text, limit=1900), start=1):
+        header = "📘 **Monthly Fee Commands**\n" if i == 1 else ""
+        await interaction.followup.send(header + part, ephemeral=False)
+
 
 # өдөр бүр 1 удаа ажиллана
 @tasks.loop(hours=24)
