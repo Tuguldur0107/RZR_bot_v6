@@ -243,7 +243,7 @@ async def mark_paid(interaction: discord.Interaction, user: discord.Member, mont
 @bot.tree.command(name="mark_unpaid", description="Админ: хэрэглэгчийг төлөөгүй болгож тохируулна")
 @app_commands.checks.has_permissions(administrator=True)
 async def mark_unpaid(interaction: discord.Interaction, user: discord.Member):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     guild = interaction.guild or bot.get_guild(GUILD_ID)
 
     conn = await db()
@@ -267,7 +267,7 @@ async def mark_unpaid(interaction: discord.Interaction, user: discord.Member):
 @bot.tree.command(name="players_active", description="Идэвхтэй (төлсөн) гишүүдийн жагсаалт")
 @app_commands.describe(limit="Хэдийг харуулах вэ? (default 50)")
 async def players_active(interaction: discord.Interaction, limit: int = 50):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     rows = await _fetch_members(active=True, limit=limit)
     body = _format_member_rows(rows)
     parts = _split_blocks(body)
@@ -282,7 +282,7 @@ async def players_active(interaction: discord.Interaction, limit: int = 50):
 @bot.tree.command(name="players_inactive", description="Идэвхгүй (төлөөгүй/хугацаа дууссан) гишүүдийн жагсаалт")
 @app_commands.describe(limit="Хэдийг харуулах вэ? (default 50)")
 async def players_inactive(interaction: discord.Interaction, limit: int = 50):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     rows = await _fetch_members(active=False, limit=limit)
     body = _format_member_rows(rows)
     parts = _split_blocks(body)
