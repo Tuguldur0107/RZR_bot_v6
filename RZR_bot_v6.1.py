@@ -81,25 +81,32 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # --- SETUP HOOK -------------------------------------------------------------
-# bot = commands.Bot(...) мөрийн ДАРАА яг энд байрлана
+# bot = commands.Bot(...) мөрийн ДАРАА яг энд байрлуул
 GUILD_OBJ = discord.Object(id=int(GUILD_ID))
 
 async def setup_hook():
-    # 0) DB POOL ЭХЛҮҮЛЭХ — команд sync-ээс ӨМНӨ
+    # 0) DB pool эхлүүлэх — команд sync-ээс ӨМНӨ
     try:
-        await init_pool()     # database.py дотор байгаа
+        await init_pool()
         print("✅ DB pool эхэллээ (setup_hook)")
     except Exception as e:
         print("❌ DB pool init алдаа (setup_hook):", e)
-        # pool байхгүй байсан ч командууд дээр ensure_pool() дуудагдана
 
-    # 1) тухайн guild дээрх бүртгэлийг тэглээд (safety)
+    # 1) Donor cog-оо ЭХЛЭЭД ачаал
+    try:
+        if not bot.get_cog("Donor"):
+            await bot.add_cog(Donor(bot))
+            print("✅ Donor cog loaded (setup_hook)")
+    except Exception as e:
+        print("❌ Donor cog load fail (setup_hook):", e)
+
+    # 2) тухайн guild дээрх бүртгэлийг тэглэх (safety)
     try:
         bot.tree.clear_commands(guild=GUILD_OBJ)
     except Exception as e:
         print("clear guild cmds err (RZR):", e)
 
-    # 2) локал модноос бүх командыг guild scope руу нэмнэ
+    # 3) локал модноос бүх командыг guild scope руу нэмэх
     try:
         for cmd in bot.tree.get_commands():
             bot.tree.add_command(cmd, guild=GUILD_OBJ)
@@ -107,7 +114,7 @@ async def setup_hook():
     except Exception as e:
         print("add_command err (RZR):", e)
 
-    # 3) sync
+    # 4) sync
     try:
         synced = await bot.tree.sync(guild=GUILD_OBJ)
         print(f"✅ guild sync OK (RZR): {[c.name for c in synced]}")
